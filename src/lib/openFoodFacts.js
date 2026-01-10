@@ -191,9 +191,60 @@ export function containsAllergen(product, allergen) {
     return hasInAllergens || hasInTraces;
 }
 
+/**
+ * Get safer alternatives for a product
+ * @param {Object} product - Current product
+ * @param {number} count - Number of alternatives to return
+ * @returns {Promise<Array>} Array of alternative products
+ */
+export async function getAlternatives(product, count = 5) {
+    try {
+        // Get the main category
+        const category = product.categories?.[0]?.replace('en:', '') || '';
+        if (!category) {
+            return [];
+        }
+
+        await enforceRateLimit();
+
+        // Search for products in the same category with better nutriscore
+        const params = new URLSearchParams({
+            categories_tags_en: category,
+            nutrition_grades_tags: 'a,b', // Only A and B ratings
+            page_size: count * 2, // Get more to filter
+            fields: 'code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments',
+        });
+
+        const response = await fetch(`${BASE_URL}/search?${params}`, {
+            headers: {
+                'User-Agent': USER_AGENT,
+            },
+        });
+
+        if (!response.ok) {
+            return [];
+        }
+
+        const data = await response.json();
+        const products = data.products || [];
+
+        // Filter out the current product and parse
+        const alternatives = products
+            .filter(p => p.code !== product.barcode)
+            .slice(0, count)
+            .map(parseProduct);
+
+        return alternatives;
+    } catch (error) {
+        console.error('Error fetching alternatives:', error);
+        return [];
+    }
+}
+
 export default {
     getProductByBarcode,
     searchProducts,
+    getAlternatives,
     getAllergenName,
     containsAllergen,
 };

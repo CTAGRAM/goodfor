@@ -11,8 +11,9 @@ import {
     Award
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
-import { searchProducts } from "@/lib/openFoodFacts";
+import { searchProducts, getAlternatives } from "@/lib/openFoodFacts";
 import { useState, useEffect } from "react";
+import { analyzeProductSafety, yearsToMonths } from "@/lib/productSafety";
 
 export default function Alternatives() {
     const { productData } = useLocalSearchParams();
@@ -29,44 +30,60 @@ export default function Alternatives() {
 
     const loadAlternatives = async () => {
         try {
-            // Search for similar products in same category
-            const category = product.categories?.[0]?.replace('en:', '') || product.name.split(' ')[0];
-            const results = await searchProducts(category, 1);
+            setLoading(true);
+            // Use the new getAlternatives function
+            const alts = await getAlternatives(product, 4);
 
-            // Filter out current product and pick top alternatives
-            const filtered = results
-                .filter(p => p.code !== product.barcode)
-                .slice(0, 4)
-                .map((p, index) => ({
-                    barcode: p.code,
-                    name: p.product_name || 'Unknown Product',
-                    brand: p.brands || '',
-                    imageUrl: p.image_url,
-                    score: Math.max(75, 98 - index * 4),
+            // Map to display format with safety analysis
+            const mapped = alts.map((alt, index) => {
+                // Calculate safety score
+                const safetyAnalysis = analyzeProductSafety(alt, yearsToMonths(5));
+                const score = Math.round(safetyAnalysis.safeScore);
+
+                return {
+                    barcode: alt.barcode,
+                    name: alt.name,
+                    brand: alt.brand,
+                    imageUrl: alt.imageUrl,
+                    score: score,
                     badge: index === 0 ? 'Top Match' : index === 1 ? 'Eco-Friendly' : 'Popular Choice',
-                    reasons: getReasons(p),
-                }));
+                    reasons: getReasons(alt, product),
+                };
+            });
 
-            setAlternatives(filtered);
+            setAlternatives(mapped);
         } catch (error) {
             console.error('Failed to load alternatives:', error);
-            // Use placeholder data
-            setAlternatives([
-                { name: 'Organic Alternative', score: 98, badge: 'Top Match', reasons: ['Lower sugar content', 'No artificial additives'] },
-                { name: 'Natural Choice', score: 94, badge: 'Eco-Friendly', reasons: ['Sustainably sourced', 'Whole grain ingredients'] },
-            ]);
+            setAlternatives([]);
         } finally {
             setLoading(false);
         }
     };
 
-    function getReasons(product) {
+    function getReasons(altProduct, originalProduct) {
         const reasons = [];
-        if (product.nutriscore_grade === 'a' || product.nutriscore_grade === 'b') {
+
+        // Compare nutriscore
+        if (altProduct.nutriScore && altProduct.nutriScore < (originalProduct.nutriScore || 'e')) {
             reasons.push('Better nutritional profile');
         }
-        reasons.push('No synthetic pesticides or additives');
-        reasons.push('Naturally processed ingredients');
+
+        // Check additives
+        if (altProduct.additives.length < (originalProduct.additives?.length || 999)) {
+            reasons.push('Fewer additives');
+        }
+
+        // Check sugars
+        if (altProduct.nutriments.sugars < (originalProduct.nutriments?.sugars || 999)) {
+            reasons.push('Lower sugar content');
+        }
+
+        // Fallback reasons
+        if (reasons.length === 0) {
+            reasons.push('No synthetic pesticides or additives');
+            reasons.push('Naturally processed');
+        }
+
         return reasons.slice(0, 2);
     }
 
