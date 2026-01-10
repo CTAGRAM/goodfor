@@ -104,27 +104,54 @@ export default function ScanProcessing() {
         }
         try {
             console.log('[ScanSave] Saving scan for user:', userId);
-            const { error } = await supabase.from('scans').insert({
-                user_id: userId,
-                barcode: product.barcode,
-                product_name: product.name,
-                brand: product.brand,
-                image_url: product.imageUrl,
-                ingredients_text: product.ingredientsText,
-                allergens_tags: product.allergens,
-                nutriments: product.nutriments,
-                category: product.categories?.[0] || 'Food Product',
-                safety_level: safetyAnalysis.safety,
-                safety_score: safetyAnalysis.safeScore,
-                safety_flags: safetyAnalysis.issues.map(i => i.reason),
-                safety_details: {
-                    issues: safetyAnalysis.issues,
-                    ageGroup: safetyAnalysis.ageGroup,
-                },
-                alternatives_data: null,
-            });
-            if (error) {
-                console.error('[ScanSave] Insert error:', error);
+
+            // Step 1: Upsert product to products table
+            const { data: productData, error: productError } = await supabase
+                .from('products')
+                .upsert({
+                    barcode: product.barcode,
+                    name: product.name,
+                    brand: product.brand,
+                    category: product.categories?.[0] || 'Food Product',
+                    image_url: product.imageUrl,
+                    ingredients: {
+                        text: product.ingredientsText,
+                        allergens: product.allergens || [],
+                    },
+                    nutrition_facts: product.nutriments || {},
+                }, {
+                    onConflict: 'barcode',
+                    ignoreDuplicates: false,
+                })
+                .select()
+                .single();
+
+            if (productError) {
+                console.error('[ScanSave] Product upsert error:', productError);
+                return;
+            }
+
+            console.log('[ScanSave] Product saved:', productData.id);
+
+            // Step 2: Insert scan record
+            const { error: scanError } = await supabase
+                .from('scans')
+                .insert({
+                    user_id: userId,
+                    product_id: productData.id,
+                    family_member_id: null, // TODO: Add family member selection
+                    safety_score: Math.round(safetyAnalysis.safeScore),
+                    safety_level: safetyAnalysis.safety,
+                    category: product.categories?.[0] || 'Food Product',
+                    safety_details: {
+                        issues: safetyAnalysis.issues,
+                        ageGroup: safetyAnalysis.ageGroup,
+                    },
+                    alternatives_data: null,
+                });
+
+            if (scanError) {
+                console.error('[ScanSave] Scan insert error:', scanError);
             } else {
                 console.log('[ScanSave] Scan saved successfully');
             }

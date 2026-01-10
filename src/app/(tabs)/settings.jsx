@@ -65,7 +65,10 @@ export default function Settings() {
           <Text style={styles.headerTitle}>Settings</Text>
           <Text style={styles.headerSubtitle}>App preferences & account</Text>
         </View>
-        <View style={[styles.profilePicture, { backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }]}>
+        <Pressable
+          style={[styles.profilePicture, { backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }]}
+          onPress={() => router.push('/edit-profile')}
+        >
           {profile?.avatar_url ? (
             <Image
               source={{ uri: profile.avatar_url }}
@@ -76,7 +79,7 @@ export default function Settings() {
               {getInitials(profile?.full_name || profile?.email)}
             </Text>
           )}
-        </View>
+        </Pressable>
       </View>
 
       {/* Content */}
