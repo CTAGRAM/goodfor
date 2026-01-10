@@ -11,9 +11,8 @@ import {
     Award
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
-import { searchProducts, getAlternatives } from "@/lib/openFoodFacts";
+import { getAlternativesEdge } from "@/lib/edgeFunctions";
 import { useState, useEffect } from "react";
-import { analyzeProductSafety, yearsToMonths } from "@/lib/productSafety";
 
 export default function Alternatives() {
     const { productData } = useLocalSearchParams();
@@ -31,29 +30,30 @@ export default function Alternatives() {
     const loadAlternatives = async () => {
         try {
             setLoading(true);
-            // Use the new getAlternatives function
-            const alts = await getAlternatives(product, 4);
+            console.log('[Alternatives] Loading for product:', product.barcode);
 
-            // Map to display format with safety analysis
-            const mapped = alts.map((alt, index) => {
-                // Calculate safety score
-                const safetyAnalysis = analyzeProductSafety(alt, yearsToMonths(5));
-                const score = Math.round(safetyAnalysis.safeScore);
+            // Use Edge Function to get alternatives
+            const alts = await getAlternativesEdge(
+                product.barcode,
+                product.categories?.[0] || product.category
+            );
 
-                return {
-                    barcode: alt.barcode,
-                    name: alt.name,
-                    brand: alt.brand,
-                    imageUrl: alt.imageUrl,
-                    score: score,
-                    badge: index === 0 ? 'Top Match' : index === 1 ? 'Eco-Friendly' : 'Popular Choice',
-                    reasons: getReasons(alt, product),
-                };
-            });
+            console.log('[Alternatives] Got', alts.length, 'alternatives from Edge Function');
+
+            // Map to display format
+            const mapped = alts.map((alt, index) => ({
+                barcode: alt.barcode,
+                name: alt.name,
+                brand: alt.brand,
+                imageUrl: alt.imageUrl,
+                score: alt.safetyScore || 75,
+                badge: alt.safetyLevel === 'safe' ? 'Top Match' : index === 0 ? 'Eco-Friendly' : 'Popular Choice',
+                reasons: [alt.reason || 'Better safety score'],
+            }));
 
             setAlternatives(mapped);
         } catch (error) {
-            console.error('Failed to load alternatives:', error);
+            console.error('[Alternatives] Failed to load:', error);
             setAlternatives([]);
         } finally {
             setLoading(false);
