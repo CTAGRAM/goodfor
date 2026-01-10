@@ -26,8 +26,7 @@ import {
     Check
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
-import { useOAuth } from "@clerk/clerk-expo";
-import { signUpWithEmail, verifyOtp, resendSignupOtp } from "@/lib/supabaseAuth";
+import { signUpWithEmail, verifyOtp, resendSignupOtp, signInWithGoogle } from "@/lib/supabaseAuth";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { useCallback } from "react";
@@ -48,7 +47,6 @@ export default function SignUp() {
 
     const insets = useSafeAreaInsets();
     const router = useRouter();
-    const { startOAuthFlow } = useOAuth({ strategy: "oauth_google" });
 
     const [fullName, setFullName] = useState("");
     const [email, setEmail] = useState("");
