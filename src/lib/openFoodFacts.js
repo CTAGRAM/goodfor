@@ -199,20 +199,30 @@ export function containsAllergen(product, allergen) {
  */
 export async function getAlternatives(product, count = 5) {
     try {
-        // Get the main category
-        const category = product.categories?.[0]?.replace('en:', '') || '';
-        if (!category) {
+        // Get search term from category or product name
+        let searchTerm = '';
+        if (product.categories && product.categories.length > 0) {
+            searchTerm = product.categories[0].replace('en:', '').replace(/-/g, ' ');
+        } else if (product.name) {
+            // Use first word of product name as fallback
+            searchTerm = product.name.split(' ')[0];
+        }
+
+        if (!searchTerm) {
+            console.log('No search term for alternatives');
             return [];
         }
 
+        console.log('[Alternatives] Searching for:', searchTerm);
         await enforceRateLimit();
 
-        // Search for products in the same category with better nutriscore
+        // Use text search with nutriscore filter
         const params = new URLSearchParams({
-            categories_tags_en: category,
-            nutrition_grades_tags: 'a,b', // Only A and B ratings
-            page_size: count * 2, // Get more to filter
-            fields: 'code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments',
+            search_terms: searchTerm,
+            nutrition_grades_tags: 'a,b',
+            page_size: String(count * 3),
+            fields: 'code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments,categories_tags',
+            sort_by: 'unique_scans_n',
         });
 
         const response = await fetch(`${BASE_URL}/search?${params}`, {
@@ -222,21 +232,24 @@ export async function getAlternatives(product, count = 5) {
         });
 
         if (!response.ok) {
+            console.log('[Alternatives] API error:', response.status);
             return [];
         }
 
         const data = await response.json();
         const products = data.products || [];
+        console.log('[Alternatives] Found', products.length, 'products');
 
         // Filter out the current product and parse
         const alternatives = products
-            .filter(p => p.code !== product.barcode)
+            .filter(p => p.code !== product.barcode && p.product_name)
             .slice(0, count)
             .map(parseProduct);
 
+        console.log('[Alternatives] Returning', alternatives.length, 'alternatives');
         return alternatives;
     } catch (error) {
-        console.error('Error fetching alternatives:', error);
+        console.error('[Alternatives] Error:', error.message);
         return [];
     }
 }

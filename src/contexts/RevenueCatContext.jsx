@@ -19,16 +19,20 @@ export const RevenueCatProvider = ({ children }) => {
             const apiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY;
 
             if (!apiKey) {
-                console.error('RevenueCat API key not found');
+                console.warn('[RevenueCat] API key not found - skipping initialization');
                 setIsLoading(false);
                 return;
             }
 
-            // Configure SDK
-            Purchases.setLogLevel(LOG_LEVEL.DEBUG);
-
-            // Initialize with API key
-            Purchases.configure({ apiKey });
+            // Configure SDK with proper error handling
+            try {
+                Purchases.setLogLevel(LOG_LEVEL.DEBUG);
+                await Purchases.configure({ apiKey });
+            } catch (configError) {
+                console.warn('[RevenueCat] Configuration failed:', configError.message);
+                setIsLoading(false);
+                return;
+            }
 
             // Set up listener for customer info updates
             Purchases.addCustomerInfoUpdateListener((info) => {
@@ -36,15 +40,19 @@ export const RevenueCatProvider = ({ children }) => {
             });
 
             // Get initial customer info
-            const info = await Purchases.getCustomerInfo();
-            updateCustomerInfo(info);
+            try {
+                const info = await Purchases.getCustomerInfo();
+                updateCustomerInfo(info);
+            } catch (infoError) {
+                console.warn('[RevenueCat] Could not get customer info:', infoError.message);
+            }
 
             // Load offerings
             await loadOfferings();
 
             setIsLoading(false);
         } catch (error) {
-            console.error('Error initializing RevenueCat:', error);
+            console.warn('[RevenueCat] Initialization error:', error.message);
             setIsLoading(false);
         }
     };

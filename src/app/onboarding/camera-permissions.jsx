@@ -1,7 +1,8 @@
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Camera, ArrowLeft } from 'lucide-react-native';
+import { Camera as CameraIcon, ArrowLeft } from 'lucide-react-native';
+import { Camera } from 'expo-camera';
 import { colors, fonts, fontSizes, spacing, radius, shadows } from '@/constants/theme';
 import { Button } from '@/components/ui';
 
@@ -9,8 +10,25 @@ export default function CameraPermissions() {
     const router = useRouter();
 
     const handleAllowCamera = async () => {
-        // In a real app, request camera permissions here
-        router.push('/onboarding/complete');
+        try {
+            const { status } = await Camera.requestCameraPermissionsAsync();
+
+            if (status === 'granted') {
+                router.push('/onboarding/complete');
+            } else {
+                Alert.alert(
+                    'Permission Denied',
+                    'Camera access is needed to scan barcodes. You can enable it in your device settings.',
+                    [
+                        { text: 'Skip for now', onPress: () => router.push('/onboarding/complete') },
+                        { text: 'Try Again', onPress: handleAllowCamera },
+                    ]
+                );
+            }
+        } catch (error) {
+            console.error('Camera permission error:', error);
+            router.push('/onboarding/complete');
+        }
     };
 
     return (
@@ -34,7 +52,7 @@ export default function CameraPermissions() {
                 <View style={styles.iconContainer}>
                     <View style={styles.iconOuter}>
                         <View style={styles.iconInner}>
-                            <Camera size={80} color={colors.primary} strokeWidth={1.5} />
+                            <CameraIcon size={80} color={colors.primary} strokeWidth={1.5} />
                         </View>
                     </View>
                 </View>
