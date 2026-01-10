@@ -1,21 +1,53 @@
-# Alternatives Not Working - Detailed Error Report
-
-## Issue Summary
-The alternatives feature is not returning any results when users scan products.
-
-## Architecture Overview
-
-### Current Implementation
-1. **Frontend**: `src/app/alternatives.jsx`
-2. **Edge Function**: `get-alternatives` (deployed to Supabase)
-3. **Database Tables**: `scans`, `products`
+# Alternatives Not Working - Complete Diagnostic Report
+**Last Updated**: 2026-01-10 21:07 IST  
+**Edge Function Version**: v3  
+**Status**: 🟡 Returns 200 but empty results
 
 ---
 
-## Edge Function Code (v2)
+## Current System State
 
-**Deployed at**: `https://yiilubsznpyiswpvqyhy.supabase.co/functions/v1/get-alternatives`
+### Database Overview
+```sql
+-- Current scans in database
+SELECT COUNT(*) FROM scans;
+-- Result: 2 scans
 
+SELECT COUNT(*) FROM products;
+-- Result: 2 products
+```
+
+### Actual Data in Database
+```
+Scan 1:
+  - Product: British Whole Milk
+  - Barcode: 20017743
+  - Brand: Morning fresh, Dairy Manor
+  - Category: en:dairies
+  - Safety Score: 85
+  - Safety Level: caution
+  - Scanned At: 2026-01-10 15:34:54 UTC
+
+Scan 2:
+  - Product: Orange juice with bits  
+  - Barcode: 5038862100700
+  - Brand: Innocent
+  - Category: en:beverages-and-beverages-preparations
+  - Safety Score: 100
+  - Safety Level: safe
+  - Scanned At: 2026-01-10 15:14:33 UTC
+```
+
+---
+
+## Edge Function v3 - DEPLOYED CODE
+
+**URL**: `https://yiilubsznpyiswpvqyhy.supabase.co/functions/v1/get-alternatives`  
+**Version**: 3  
+**JWT Verification**: DISABLED  
+**Last Updated**: 2026-01-10 14:47:19 UTC
+
+### Complete Source Code
 ```typescript
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -34,14 +66,11 @@ serve(async (req) => {
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_ANON_KEY") ?? "",
-      {
-        global: {
-          headers: { Authorization: req.headers.get("Authorization")! },
-        },
-      }
     );
 
-    const { barcode, category } = await req.json();
+    const { barcode, category, safety_score } = await req.json();
+
+    console.log("[GetAlternatives] Request:", { barcode, category, safety_score });
 
     if (!barcode) {
       return new Response(
@@ -50,32 +79,15 @@ serve(async (req) => {
       );
     }
 
-    // Get user's recent scans for this product to find category and safety score
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    const userId = user?.id;
+    const searchCategory = category || "Food Product";
+    const minScore = safety_score || 50; // Default minimum score
 
-    console.log("[GetAlternatives] User ID:", userId);
-    console.log("[GetAlternatives] Barcode:", barcode);
-    console.log("[GetAlternatives] Category:", category);
-
-    // Get current product's category and safety score
-    const { data: currentScans } = await supabaseClient
-      .from("scans")
-      .select("safety_score, category, product_id, products(*)")
-      .eq("products.barcode", barcode)
-      .order("scanned_at", { ascending: false })
-      .limit(1);
-
-    const searchCategory = category || currentScans?.[0]?.category || "Food Product";
-    const minScore = currentScans?.[0]?.safety_score || 0;
-
-    console.log("[GetAlternatives] Search category:", searchCategory);
-    console.log("[GetAlternatives] Min safety score:", minScore);
+    console.log("[GetAlternatives] Searching:", { searchCategory, minScore });
 
     // Search for products in same category with better safety scores
     const { data: betterScans, error: searchError } = await supabaseClient
       .from("scans")
-      .select(`
+      .select(\`
         safety_score,
         safety_level,
         category,
@@ -86,7 +98,7 @@ serve(async (req) => {
           brand,
           image_url
         )
-      `)
+      \`)
       .eq("category", searchCategory)
       .gte("safety_score", minScore + 5)
       .order("safety_score", { ascending: false })
@@ -102,7 +114,12 @@ serve(async (req) => {
 
     console.log("[GetAlternatives] Found", betterScans?.length || 0, "alternatives");
 
-    const formattedAlternatives = (betterScans || []).map((scan) => ({
+    // Filter out the current product if it's in the results
+    const filtered = (betterScans || []).filter(scan => 
+      scan.products?.barcode !== barcode
+    );
+
+    const formattedAlternatives = filtered.map((scan) => ({
       barcode: scan.products?.barcode,
       name: scan.products?.name,
       brand: scan.products?.brand,
@@ -110,7 +127,7 @@ serve(async (req) => {
       safetyScore: scan.safety_score,
       safetyLevel: scan.safety_level,
       improvement: scan.safety_score - minScore,
-      reason: `Better safety score (+${scan.safety_score - minScore} points)`,
+      reason: \`Better safety score (+\${scan.safety_score - minScore} points)\`,
     }));
 
     return new Response(
@@ -136,10 +153,42 @@ serve(async (req) => {
 
 ---
 
-## Frontend Call
+## Edge Function Logs (Latest)
 
-**File**: `src/lib/edgeFunctions.js`
+### Recent Invocations
+```
+1. Timestamp: 2026-01-10 15:35:10 UTC
+   Version: 3
+   Status: 200 OK
+   Execution Time: 345ms
+   
+2. Timestamp: 2026-01-10 15:35:03 UTC
+   Version: 3
+   Status: 200 OK
+   Execution Time: 3218ms
+   
+3. Timestamp: 2026-01-10 14:54:59 UTC
+   Version: 2
+   Status: 200 OK
+   Execution Time: 3344ms
+   
+4. Timestamp: 2026-01-10 14:22:21 UTC
+   Version: 1
+   Status: 401 UNAUTHORIZED
+   Execution Time: 2510ms
+```
 
+**Analysis**: 
+- Function is executing successfully (200 responses)
+- Execution times are normal (345ms - 3.2s)
+- v1 had 401 errors (JWT verification issue - FIXED in v2)
+- v3 is currently deployed and responding
+
+---
+
+## Frontend Implementation
+
+### File: `src/lib/edgeFunctions.js`
 ```javascript
 export async function getAlternativesEdge(barcode, category) {
     console.log('[EdgeFunction] Getting alternatives for:', barcode, category);
@@ -166,10 +215,10 @@ async function callEdgeFunction(functionName, body = {}) {
     };
 
     if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
+        headers['Authorization'] = \`Bearer \${session.access_token}\`;
     }
 
-    const response = await fetch(`${EDGE_FUNCTIONS_URL}/${functionName}`, {
+    const response = await fetch(\`\${EDGE_FUNCTIONS_URL}/\${functionName}\`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
@@ -177,228 +226,279 @@ async function callEdgeFunction(functionName, body = {}) {
 
     if (!response.ok) {
         const error = await response.json();
-        throw new Error(error.error || `Edge Function error: ${response.status}`);
+        throw new Error(error.error || \`Edge Function error: \${response.status}\`);
     }
 
     return await response.json();
 }
 ```
 
+### File: `src/app/alternatives.jsx`
+```javascript
+const loadAlternatives = async () => {
+    try {
+        setLoading(true);
+        console.log('[Alternatives] Loading for product:', product.barcode);
+        
+        // Use Edge Function to get alternatives
+        const alts = await getAlternativesEdge(
+            product.barcode,
+            product.categories?.[0] || product.category
+        );
+
+        console.log('[Alternatives] Got', alts.length, 'alternatives from Edge Function');
+
+        // Map to display format
+        const mapped = alts.map((alt, index) => ({
+            barcode: alt.barcode,
+            name: alt.name,
+            brand: alt.brand,
+            imageUrl: alt.imageUrl,
+            score: alt.safetyScore || 75,
+            badge: alt.safetyLevel === 'safe' ? 'Top Match' : index === 0 ? 'Eco-Friendly' : 'Popular Choice',
+            reasons: [alt.reason || 'Better safety score'],
+        }));
+
+        setAlternatives(mapped);
+    } catch (error) {
+        console.error('[Alternatives] Failed to load:', error);
+        setAlternatives([]);
+    } finally {
+        setLoading(false);
+    }
+};
+```
+
 ---
 
-## Database Schema
+## Root Cause Analysis
 
-### `scans` table
-```sql
-CREATE TABLE scans (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES profiles(id),
-  product_id UUID REFERENCES products(id),
-  family_member_id UUID REFERENCES family_members(id),
-  safety_score INTEGER,
-  safety_level TEXT,
-  scanned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  category TEXT,
-  safety_details JSONB,
-  alternatives_data JSONB
+### 🔴 CRITICAL ISSUE: Frontend NOT Passing safety_score
+
+**The Problem**: The frontend code is calling:
+```javascript
+getAlternativesEdge(product.barcode, product.categories?.[0])
+```
+
+But the function signature in `edgeFunctions.js` is:
+```javascript
+export async function getAlternativesEdge(barcode, category)
+```
+
+**Missing**: The `safety_score` parameter!
+
+The Edge Function v3 expects:
+```json
+{
+  "barcode": "...",
+  "category": "...",
+  "safety_score": 85  // <-- MISSING IN FRONTEND CALL
+}
+```
+
+But frontend only sends:
+```json
+{
+  "barcode": "...",
+  "category": "..."
+  // safety_score is undefined!
+}
+```
+
+### Why This Causes Empty Results
+
+1. **Request**: User scans "Orange Juice" (safety_score = 100)
+2. **Frontend sends**: \`{ barcode: "5038862100700", category: "en:beverages-and-beverages-preparations" }\`
+3. **Edge Function receives**: \`safety_score = undefined\`
+4. **Edge Function defaults**: \`minScore = 50\`
+5. **Query runs**: Find products in "en:beverages-and-beverages-preparations" with score >= 55
+6. **Database has**: Only 1 beverage (Orange Juice itself, score 100)
+7. **Filter removes**: Current product (Orange Juice)
+8. **Result**: Empty array ✓ (technically correct, but not useful)
+
+### Example Scenario with Milk
+1. **Request**: User scans "British Whole Milk" (safety_score = 85)
+2. **Frontend would send**: \`{ barcode: "20017743", category: "en:dairies" }\`
+3. **Edge Function defaults**: \`minScore = 50\`
+4. **Query**: Find dairies with score >= 55
+5. **Database has**: Only 1 dairy product (the milk itself)
+6. **After filtering**: Empty (milk removed)
+7. **Result**: Empty array
+
+---
+
+## Why It Returns Empty
+
+### Scenario 1: Category Mismatch
+```
+User scanning: barcode=5038862100700 (Orange Juice)
+Category sent: "en:beverages-and-beverages-preparations"
+
+Database query: WHERE category = "en:beverages-and-beverages-preparations" AND safety_score >= 55
+
+Current scans in DB:
+  ✅ Orange Juice (category: en:beverages-and-beverages-preparations, score: 100)
+  ❌ Milk (category: en:dairies, score: 85) - wrong category
+
+After filtering out current product:
+  Result: [] (empty)
+```
+
+### Scenario 2: Insufficient Data
+- Only 2 products in entire database
+- When user scans one, only 1 remains
+- If that 1 doesn't match category → empty
+- If it matches but is the same product → filtered out → empty
+
+---
+
+## The Real Fix Needed
+
+### Option 1: Pass safety_score from Frontend (RECOMMENDED)
+```javascript
+// edgeFunctions.js
+export async function getAlternativesEdge(barcode, category, safety_score) {
+    const result = await callEdgeFunction('get-alternatives', {
+        barcode,
+        category,
+        safety_score, // <-- ADD THIS
+    });
+    // ...
+}
+
+// alternatives.jsx
+const safetyScore = product.safetyScore || product.safeScore || 50;
+const alts = await getAlternativesEdge(
+    product.barcode,
+    product.categories?.[0] || product.category,
+    safetyScore // <-- ADD THIS
 );
 ```
 
-### `products` table
+### Option 2: Fallback to OpenFoodFacts
+If no alternatives in database, fetch from external API:
+```typescript
+// In Edge Function
+if (betterScans.length === 0) {
+    // Fetch from OpenFoodFacts API
+    // Search same category
+    // Return those instead
+}
+```
+
+### Option 3: Seed Database with Sample Products
 ```sql
-CREATE TABLE products (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  barcode TEXT UNIQUE,
-  name TEXT,
-  brand TEXT,
-  category TEXT,
-  image_url TEXT,
-  ingredients JSONB,
-  nutrition_facts JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-```
-
----
-
-## Problem Analysis
-
-### Issue 1: Empty Database
-**Root Cause**: The `scans` and `products` tables are likely empty because:
-1. New scanning logic was just implemented
-2. Previous scans may have used old schema (different column names)
-3. No historical data has been migrated
-
-**Evidence**:
-- Edge Function query: `.from("scans").select(...)` returns empty array
-- No alternatives found because there are no scans to compare against
-
-### Issue 2: Query Logic Flaw
-The Edge Function queries `.eq("products.barcode", barcode)` which:
-1. Tries to find the CURRENT product in the scans table
-2. Then searches for alternatives with better scores
-3. **Problem**: If this is the first time scanning this product, it won't exist in scans yet!
-
-**Flow**:
-```
-User scans product → 
-Frontend calls get-alternatives with barcode →
-Edge Function queries scans for that barcode →
-❌ Not found (first scan) →
-Returns 0 alternatives
-```
-
-### Issue 3: Scan Saving May Be Failing
-From earlier logs: `[ScanSave] Insert error: {"code": "PGRST204"}`
-
-If scans aren't being saved, the database stays empty, and alternatives will never work.
-
----
-
-## Solutions
-
-### Solution 1: Fix Scan Saving (CRITICAL)
-Ensure scans are actually being saved to the database:
-```javascript
-// Check scan-processing.jsx
-// Verify product upsert succeeds
-// Verify scan insert succeeds
-// Check for errors in console
-```
-
-### Solution 2: Change Alternatives Logic
-Instead of querying for the current product in scans:
-```javascript
-// OLD (broken):
-const currentScans = await supabase
-  .from("scans")
-  .select("...")
-  .eq("products.barcode", barcode)  // ❌ Won't find first-time scans
-
-// NEW (fixed):
-// Get the product directly from products table
-// OR accept safety_score in the request body
-// OR query OpenFoodFacts as fallback
-```
-
-### Solution 3: Seed Database with Sample Data
-For testing, add sample products with various safety scores:
-```sql
+-- Add 20-30 sample products across categories
 INSERT INTO products (barcode, name, brand, category, ...) VALUES
-  ('123456', 'Healthy Snack', 'Brand A', 'Snacks', ...),
-  ('789012', 'Better Snack', 'Brand B', 'Snacks', ...);
-
-INSERT INTO scans (user_id, product_id, safety_score, safety_level, category) VALUES
-  (...);
+  ('111111', 'Healthy Snack A', 'Brand X', 'Snacks', ...),
+  ('222222', 'Healthy Snack B', 'Brand Y', 'Snacks', ...),
+  -- ... more products
 ```
 
 ---
 
-## Recommended Fix Order
+## Expected vs Actual Behavior
 
-1. **First**: Verify scans are being saved
-   - Check terminal logs for `[ScanSave] Product saved: <uuid>`
-   - Check Supabase dashboard → Table Editor → scans table
-   - If empty, fix the saving logic
+### What SHOULD Happen
+```
+User scans Milk (score 70)
+→ App sends: { barcode: "20017743", category: "en:dairies", safety_score: 70 }
+→ Edge Function queries: category = "en:dairies" AND score >= 75
+→ Database returns: [Better Milk brands from other users' scans]
+→ User sees: 3-5 healthier milk alternatives
+```
 
-2. **Second**: Update Edge Function to handle first-time scans
-   - Accept `safety_score` in request body
-   - Don't query scans for current product
-   - Just search for better alternatives in same category
-
-3. **Third**: Test with real scans
-   - Scan multiple products
-   - Verify they appear in database
-   - Try alternatives again
+### What ACTUALLY Happens
+```
+User scans Milk (score 70)
+→ App sends: { barcode: "20017743", category: "en:dairies" }  ❌ no safety_score
+→ Edge Function queries: category = "en:dairies" AND score >= 55 (default)
+→ Database returns: [Milk itself]
+→ Filter removes current product
+→ User sees: [] (empty)
+```
 
 ---
 
-## How to Debug
+## Testing Commands
 
-### Check if scans are being saved:
+### Check what Edge Function would return for Orange Juice
+```bash
+curl -X POST https://yiilubsznpyiswpvqyhy.supabase.co/functions/v1/get-alternatives \
+  -H "Content-Type: application/json" \
+  -d '{
+    "barcode": "5038862100700",
+    "category": "en:beverages-and-beverages-preparations",
+    "safety_score": 100
+  }'
+```
+
+### Check database for potential alternatives
 ```sql
--- Run in Supabase SQL Editor
 SELECT 
-  s.id, 
-  s.safety_score, 
-  s.category,
   p.name,
-  p.barcode
+  p.barcode,
+  p.category,
+  s.safety_score
 FROM scans s
 JOIN products p ON s.product_id = p.id
-ORDER BY s.scanned_at DESC
-LIMIT 10;
-```
-
-### Check Edge Function logs:
-Go to Supabase Dashboard → Edge Functions → get-alternatives → Logs
-
-Look for:
-- `[GetAlternatives] User ID:`
-- `[GetAlternatives] Search category:`
-- `[GetAlternatives] Found X alternatives`
-
-### Check frontend console:
-Look for:
-- `[ScanSave] Product saved:` 
-- `[ScanSave] Scan saved successfully`
-- `[EdgeFunction] Alternatives result:`
-
----
-
-## Expected API Flow
-
-### Request
-```json
-POST https://yiilubsznpyiswpvqyhy.supabase.co/functions/v1/get-alternatives
-Authorization: Bearer <token>
-Content-Type: application/json
-
-{
-  "barcode": "5038862100700",
-  "category": "Beverages"
-}
-```
-
-### Response (Success)
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "barcode": "123456789",
-      "name": "Healthier Alternative",
-      "brand": "Good Brand",
-      "imageUrl": "https://...",
-      "safetyScore": 85,
-      "safetyLevel": "safe",
-      "improvement": 15,
-      "reason": "Better safety score (+15 points)"
-    }
-  ],
-  "count": 1,
-  "searchedCategory": "Beverages"
-}
-```
-
-### Response (Empty - Current Issue)
-```json
-{
-  "success": true,
-  "data": [],
-  "count": 0,
-  "searchedCategory": "Beverages"
-}
+WHERE s.category = 'en:beverages-and-beverages-preparations'
+  AND s.safety_score >= 105
+ORDER BY s.safety_score DESC;
 ```
 
 ---
 
-## Next Steps for AI/Developer
+## Summary
 
-1. Run SQL query to check if scans table has data
-2. Check Edge Function logs for any errors
-3. Verify scan saving is working (check terminal)
-4. Update Edge Function to not require current product in scans
-5. Test with multiple scanned products
-6. Consider adding sample/seed data for testing
+| Component | Status | Issue |
+|-----------|--------|-------|
+| Edge Function v3 | ✅ Deployed | Working correctly |
+| Database Scans | ✅ Has Data | Only 2 scans total |  
+| Frontend Call | ❌ Bug | NOT passing \`safety_score\` |
+| Results | ❌ Empty | Not enough data + missing parameter |
+
+### Immediate Actions Required
+
+1. **Fix Frontend** (src/lib/edgeFunctions.js):
+   - Add \`safety_score\` parameter to \`getAlternativesEdge\` function
+   
+2. **Fix Frontend** (src/app/alternatives.jsx):
+   - Extract safety score from product data
+   - Pass it to \`getAlternativesEdge\`
+
+3. **Optional**: Seed database with more sample scans for realistic testing
+
+---
+
+## Code Changes Needed
+
+### File: \`src/lib/edgeFunctions.js\`
+```diff
+- export async function getAlternativesEdge(barcode, category) {
++ export async function getAlternativesEdge(barcode, category, safety_score) {
+    const result = await callEdgeFunction('get-alternatives', {
+        barcode,
+        category,
++       safety_score,
+    });
+```
+
+### File: \`src/app/alternatives.jsx\`  
+```diff
+  const loadAlternatives = async () => {
+      try {
+          setLoading(true);
++         const safetyScore = product.safetyScore || product.safeScore || 50;
+          
+          const alts = await getAlternativesEdge(
+              product.barcode,
+-             product.categories?.[0] || product.category
++             product.categories?.[0] || product.category,
++             safetyScore
+          );
+```
+
+---
+
+**Status**: Ready for code fixes. Edge Function is working correctly. Frontend needs 2 small changes.
