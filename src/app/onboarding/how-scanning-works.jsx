@@ -92,7 +92,7 @@ export default function HowScanningWorks() {
                     <Text style={styles.realtimeText}>Real-time analysis active</Text>
                 </View>
 
-                <View style={{ height: 200 }} />
+
             </ScrollView>
 
             {/* Footer */}

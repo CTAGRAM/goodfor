@@ -260,7 +260,7 @@ export default function Welcome() {
           </View>
         </View>
 
-        <View style={{ height: 200 }} />
+
       </ScrollView>
 
       {/* Footer */}

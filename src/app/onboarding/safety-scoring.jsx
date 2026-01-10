@@ -104,7 +104,7 @@ export default function SafetyScoring() {
                     </Text>
                 </View>
 
-                <View style={{ height: 200 }} />
+
             </ScrollView>
 
             {/* Footer */}

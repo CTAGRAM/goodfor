@@ -115,7 +115,7 @@ export default function FamilyProfiles() {
                     <Text style={styles.badgeText}>Multi-profile support</Text>
                 </View>
 
-                <View style={{ height: 200 }} />
+
             </ScrollView>
 
             {/* Footer */}

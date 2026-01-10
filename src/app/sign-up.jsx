@@ -149,32 +149,23 @@ export default function SignUp() {
     const handleGoogleSignUp = useCallback(async () => {
         try {
             setLoading(true);
-            const redirectUrl = Linking.createURL("/");
+            const { session, error } = await signInWithGoogle();
 
-            const { createdSessionId, setActive: oauthSetActive, signUp: oauthSignUp, signIn } = await startOAuthFlow({
-                redirectUrl,
-            });
+            if (error) {
+                throw error;
+            }
 
-            if (createdSessionId) {
-                await oauthSetActive({ session: createdSessionId });
+            if (session) {
                 router.replace("/(tabs)/home");
-            } else {
-                if (oauthSignUp?.status === "complete") {
-                    await oauthSetActive({ session: oauthSignUp.createdSessionId });
-                    router.replace("/(tabs)/home");
-                } else if (signIn?.status === "complete") {
-                    await oauthSetActive({ session: signIn.createdSessionId });
-                    router.replace("/(tabs)/home");
-                }
             }
         } catch (err) {
-            console.error("OAuth error:", JSON.stringify(err, null, 2));
-            const errorMessage = err?.errors?.[0]?.message || err?.message || "An error occurred during Google sign up";
+            console.error("OAuth error:", err);
+            const errorMessage = err?.message || "An error occurred during Google sign up";
             Alert.alert("Google Sign Up Failed", errorMessage);
         } finally {
             setLoading(false);
         }
-    }, [startOAuthFlow, router]);
+    }, [router]);
 
     if (pendingVerification) {
         return (
