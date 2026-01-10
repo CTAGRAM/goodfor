@@ -1,0 +1,211 @@
+import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { Camera, ArrowLeft } from 'lucide-react-native';
+import { colors, fonts, fontSizes, spacing, radius, shadows } from '@/constants/theme';
+import { Button } from '@/components/ui';
+
+export default function CameraPermissions() {
+    const router = useRouter();
+
+    const handleAllowCamera = async () => {
+        // In a real app, request camera permissions here
+        router.push('/onboarding/complete');
+    };
+
+    return (
+        <View style={styles.container}>
+            <StatusBar style="dark" />
+
+            {/* Background blurs */}
+            <View style={styles.blurTop} />
+            <View style={styles.blurBottom} />
+
+            {/* Header */}
+            <View style={styles.header}>
+                <Pressable style={styles.backButton} onPress={() => router.back()}>
+                    <ArrowLeft size={24} color={colors.foreground} />
+                </Pressable>
+            </View>
+
+            {/* Main content */}
+            <View style={styles.content}>
+                {/* Camera icon */}
+                <View style={styles.iconContainer}>
+                    <View style={styles.iconOuter}>
+                        <View style={styles.iconInner}>
+                            <Camera size={80} color={colors.primary} strokeWidth={1.5} />
+                        </View>
+                    </View>
+                </View>
+
+                {/* Text content */}
+                <View style={styles.textContent}>
+                    <Text style={styles.title}>
+                        Camera access{'\n'}needed
+                    </Text>
+                    <Text style={styles.description}>
+                        We need camera access to scan product barcodes. Your privacy is our priority — we never store photos.
+                    </Text>
+                </View>
+
+                {/* Privacy points */}
+                <View style={styles.privacyPoints}>
+                    <View style={styles.privacyPoint}>
+                        <View style={styles.checkmark} />
+                        <Text style={styles.privacyText}>Photos are never saved</Text>
+                    </View>
+                    <View style={styles.privacyPoint}>
+                        <View style={styles.checkmark} />
+                        <Text style={styles.privacyText}>Only used for scanning</Text>
+                    </View>
+                    <View style={styles.privacyPoint}>
+                        <View style={styles.checkmark} />
+                        <Text style={styles.privacyText}>You can revoke anytime</Text>
+                    </View>
+                </View>
+            </View>
+
+            {/* Footer */}
+            <View style={styles.footer}>
+                <Button
+                    variant="primary"
+                    size="lg"
+                    onPress={handleAllowCamera}
+                >
+                    Allow camera access
+                </Button>
+
+                <Pressable
+                    style={styles.skipButton}
+                    onPress={() => router.push('/onboarding/complete')}
+                >
+                    <Text style={styles.skipText}>Skip for now</Text>
+                </Pressable>
+            </View>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: colors.background,
+    },
+    blurTop: {
+        position: 'absolute',
+        top: -80,
+        right: -80,
+        width: 256,
+        height: 256,
+        backgroundColor: colors.accent,
+        opacity: 0.3,
+        borderRadius: 128,
+    },
+    blurBottom: {
+        position: 'absolute',
+        bottom: '30%',
+        left: -60,
+        width: 192,
+        height: 192,
+        backgroundColor: colors.chart1,
+        opacity: 0.05,
+        borderRadius: 96,
+    },
+    header: {
+        paddingHorizontal: spacing[6],
+        paddingTop: spacing[14],
+        paddingBottom: spacing[4],
+        zIndex: 10,
+    },
+    backButton: {
+        width: 44,
+        height: 44,
+        marginLeft: -12,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    content: {
+        flex: 1,
+        paddingHorizontal: spacing[8],
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    iconContainer: {
+        marginBottom: spacing[12],
+    },
+    iconOuter: {
+        width: 200,
+        height: 200,
+        backgroundColor: `${colors.accent}4D`,
+        borderRadius: 100,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    iconInner: {
+        width: 160,
+        height: 160,
+        backgroundColor: `${colors.accent}66`,
+        borderRadius: 80,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    textContent: {
+        gap: spacing[6],
+        alignItems: 'center',
+        marginBottom: spacing[10],
+    },
+    title: {
+        fontSize: fontSizes['5xl'],
+        fontFamily: fonts.sansExtraBold,
+        color: colors.foreground,
+        lineHeight: fontSizes['5xl'] * 1.1,
+        letterSpacing: -0.5,
+        textAlign: 'center',
+    },
+    description: {
+        fontSize: fontSizes.xl - 1,
+        fontFamily: fonts.sans,
+        color: colors.mutedForeground,
+        lineHeight: fontSizes.xl * 1.5,
+        textAlign: 'center',
+        maxWidth: '85%',
+    },
+    privacyPoints: {
+        gap: spacing[4],
+        alignSelf: 'stretch',
+    },
+    privacyPoint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing[3],
+    },
+    checkmark: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        backgroundColor: colors.chart1,
+    },
+    privacyText: {
+        fontSize: fontSizes.base,
+        fontFamily: fonts.sansMedium,
+        color: colors.foreground,
+    },
+    footer: {
+        paddingHorizontal: spacing[8],
+        paddingBottom: spacing[10],
+        paddingTop: spacing[8],
+        gap: spacing[4],
+    },
+    skipButton: {
+        paddingHorizontal: spacing[6],
+        paddingVertical: spacing[3],
+        alignItems: 'center',
+    },
+    skipText: {
+        fontSize: fontSizes.sm,
+        fontFamily: fonts.sansSemiBold,
+        color: colors.mutedForeground,
+    },
+});
