@@ -14,7 +14,7 @@ export default function ScanProcessing() {
     const { barcode } = useLocalSearchParams();
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { profile } = useAuth();
+    const { user, profile } = useAuth();
     const [status, setStatus] = useState('Checking ingredients...');
 
     // Animations
@@ -96,10 +96,16 @@ export default function ScanProcessing() {
     };
 
     const saveScanToHistory = async (product, safetyAnalysis) => {
-        if (!profile?.id) return;
+        // Use user.id (from auth) as fallback if profile.id is not available
+        const userId = profile?.id || user?.id;
+        if (!userId) {
+            console.warn('[ScanSave] No user ID available, skipping save');
+            return;
+        }
         try {
-            await supabase.from('scans').insert({
-                user_id: profile.id,
+            console.log('[ScanSave] Saving scan for user:', userId);
+            const { error } = await supabase.from('scans').insert({
+                user_id: userId,
                 barcode: product.barcode,
                 product_name: product.name,
                 brand: product.brand,
@@ -117,8 +123,13 @@ export default function ScanProcessing() {
                 },
                 alternatives_data: null,
             });
+            if (error) {
+                console.error('[ScanSave] Insert error:', error);
+            } else {
+                console.log('[ScanSave] Scan saved successfully');
+            }
         } catch (e) {
-            console.error('Save error:', e);
+            console.error('[ScanSave] Exception:', e);
         }
     };
 

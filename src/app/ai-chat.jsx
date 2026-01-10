@@ -28,16 +28,20 @@ import {
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { sendMessage } from "@/lib/openai";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabaseAuth";
 
 export default function AIChat() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const scrollViewRef = useRef(null);
+    const { user, profile } = useAuth();
 
     const [message, setMessage] = useState("");
     const [selectedAge, setSelectedAge] = useState("adult");
     const [messages, setMessages] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [userContext, setUserContext] = useState({});
 
     const quickPrompts = [
         "Is this safe?",
@@ -51,6 +55,52 @@ export default function AIChat() {
         { id: "toddler", label: "Toddler", icon: Baby },
     ];
 
+    // Fetch user context on mount
+    useEffect(() => {
+        const fetchUserContext = async () => {
+            if (!user?.id) return;
+
+            try {
+                // Fetch recent scans
+                const { data: recentScans } = await supabase
+                    .from('scans')
+                    .select('product_name, safety_level, safety_score')
+                    .eq('user_id', user.id)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+
+                // Fetch favorites
+                const { data: favorites } = await supabase
+                    .from('favorites')
+                    .select('product_name')
+                    .eq('user_id', user.id)
+                    .limit(5);
+
+                // Get allergens from profile
+                const allergens = profile?.allergens || [];
+                const dietaryPreferences = profile?.dietary_preferences || [];
+
+                setUserContext({
+                    allergens,
+                    dietaryPreferences,
+                    recentScans: recentScans || [],
+                    favorites: favorites || [],
+                });
+
+                console.log('[AIChat] User context loaded:', {
+                    allergens: allergens.length,
+                    preferences: dietaryPreferences.length,
+                    scans: recentScans?.length || 0,
+                    favorites: favorites?.length || 0,
+                });
+            } catch (error) {
+                console.error('[AIChat] Error fetching user context:', error);
+            }
+        };
+
+        fetchUserContext();
+    }, [user?.id, profile]);
+
     const handleSend = async () => {
         if (!message.trim() || isLoading) return;
 
@@ -61,7 +111,7 @@ export default function AIChat() {
         setIsLoading(true);
 
         try {
-            const response = await sendMessage(newMessages, selectedAge);
+            const response = await sendMessage(newMessages, selectedAge, userContext);
             setMessages([...newMessages, { role: "assistant", content: response }]);
         } catch (error) {
             setMessages([

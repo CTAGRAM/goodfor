@@ -11,16 +11,15 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ArrowLeft, Check, Sparkles, Zap, Crown } from "lucide-react-native";
+import { X, QrCode, UserPlus, ShieldCheck } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { useRevenueCat } from "@/contexts/RevenueCatContext";
-import { RevenueCatUI } from "react-native-purchases-ui";
 
 export default function Paywall() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { offerings, isLoading, purchasePackage, isPro } = useRevenueCat();
-    const [purchasing, setPurchasing] = useState(null);
+    const [purchasing, setPurchasing] = useState(false);
 
     // If already pro, redirect
     if (isPro) {
@@ -29,10 +28,19 @@ export default function Paywall() {
         return null;
     }
 
-    const handlePurchase = async (pkg) => {
-        setPurchasing(pkg.identifier);
-        const result = await purchasePackage(pkg);
-        setPurchasing(null);
+    const handlePurchase = async () => {
+        const annualPackage = offerings?.current?.availablePackages?.find(
+            pkg => pkg.packageType === "ANNUAL"
+        ) || offerings?.current?.availablePackages?.[0];
+
+        if (!annualPackage) {
+            Alert.alert("Error", "No subscription package available");
+            return;
+        }
+
+        setPurchasing(true);
+        const result = await purchasePackage(annualPackage);
+        setPurchasing(false);
 
         if (result.success) {
             Alert.alert(
@@ -43,136 +51,133 @@ export default function Paywall() {
         }
     };
 
-    const presentPaywall = async () => {
-        try {
-            const paywallResult = await RevenueCatUI.presentPaywall();
-
-            // User made a purchase or dismissed
-            if (paywallResult === RevenueCatUI.PAYWALL_RESULT.PURCHASED) {
-                Alert.alert("Success!", "Welcome to GoodFor Pro!");
-                router.back();
-            }
-        } catch (error) {
-            console.error("Paywall error:", error);
+    const features = [
+        {
+            icon: QrCode,
+            title: "Unlimited scans",
+            description: "Scan as many products as you need every day without limits."
+        },
+        {
+            icon: UserPlus,
+            title: "5 Family profiles",
+            description: "Create individual profiles for each family member's needs."
+        },
+        {
+            icon: ShieldCheck,
+            title: "Advanced safety alerts",
+            description: "Get instant warnings for specific allergens and harmful additives."
         }
-    };
+    ];
 
-    const currentOffering = offerings?.current;
-
-    if (isLoading || !currentOffering) {
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.primary} />
-                <Text style={styles.loadingText}>Loading subscriptions...</Text>
-            </View>
-        );
-    }
-
-    // Use RevenueCat's native paywall if available
-    if (currentOffering.availablePackages.length > 0) {
-        // Show RevenueCat Paywall UI
-        return (
-            <View style={styles.container}>
-                <StatusBar style="dark" />
-                <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-                    <Pressable style={styles.backButton} onPress={() => router.back()}>
-                        <ArrowLeft size={24} color={colors.foreground} />
-                    </Pressable>
-                </View>
-
-                <View style={styles.content}>
-                    <Pressable style={styles.nativePaywallButton} onPress={presentPaywall}>
-                        <Crown size={24} color={colors.primaryForeground} />
-                        <Text style={styles.nativePaywallText}>View Subscription Options</Text>
-                    </Pressable>
-
-                    <Text style={styles.orText}>Or choose below:</Text>
-
-                    {/* Custom package list */}
-                    <ScrollView showsVerticalScrollIndicator={false}>
-                        {currentOffering.availablePackages.map((pkg) => {
-                            const isPopular = pkg.packageType === "ANNUAL";
-                            const isPurchasing = purchasing === pkg.identifier;
-
-                            return (
-                                <Pressable
-                                    key={pkg.identifier}
-                                    style={[
-                                        styles.packageCard,
-                                        isPopular && styles.packageCardPopular
-                                    ]}
-                                    onPress={() => handlePurchase(pkg)}
-                                    disabled={isPurchasing}
-                                >
-                                    {isPopular && (
-                                        <View style={styles.popularBadge}>
-                                            <Sparkles size={12} color="#fff" />
-                                            <Text style={styles.popularText}>BEST VALUE</Text>
-                                        </View>
-                                    )}
-
-                                    <View style={styles.packageContent}>
-                                        <View style={styles.packageInfo}>
-                                            <Text style={styles.packageTitle}>
-                                                {pkg.product.title.replace("(GoodFor)", "").trim()}
-                                            </Text>
-                                            <Text style={styles.packageDesc}>
-                                                {pkg.product.description}
-                                            </Text>
-                                        </View>
-
-                                        <View style={styles.packagePricing}>
-                                            <Text style={styles.packagePrice}>
-                                                {pkg.product.priceString}
-                                            </Text>
-                                            {pkg.packageType !== "LIFETIME" && (
-                                                <Text style={styles.packagePeriod}>
-                                                    /{pkg.packageType === "ANNUAL" ? "year" : "month"}
-                                                </Text>
-                                            )}
-                                        </View>
-                                    </View>
-
-                                    {isPurchasing ? (
-                                        <ActivityIndicator size="small" color={colors.primary} />
-                                    ) : (
-                                        <View
-                                            style={[
-                                                styles.selectButton,
-                                                isPopular && styles.selectButtonPopular
-                                            ]}
-                                        >
-                                            <Text
-                                                style={[
-                                                    styles.selectButtonText,
-                                                    isPopular && styles.selectButtonTextPopular
-                                                ]}
-                                            >
-                                                Select
-                                            </Text>
-                                        </View>
-                                    )}
-                                </Pressable>
-                            );
-                        })}
-                    </ScrollView>
-                </View>
-            </View>
-        );
-    }
+    const annualPackage = offerings?.current?.availablePackages?.find(
+        pkg => pkg.packageType === "ANNUAL"
+    );
+    const price = annualPackage?.product?.priceString || "£39.99";
 
     return (
         <View style={styles.container}>
             <StatusBar style="dark" />
+
+            {/* Background blurs */}
+            <View style={styles.blurTop} />
+            <View style={styles.blurBottom} />
+
+            {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-                <Pressable style={styles.backButton} onPress={() => router.back()}>
-                    <ArrowLeft size={24} color={colors.foreground} />
+                <Pressable
+                    style={styles.closeButton}
+                    onPress={() => router.back()}
+                >
+                    <X size={28} color={colors.mutedForeground} />
                 </Pressable>
+                <View style={styles.headerCenter}>
+                    <Text style={styles.premiumLabel}>PREMIUM</Text>
+                </View>
+                <View style={styles.headerSpacer} />
             </View>
 
-            <View style={styles.noOfferings}>
-                <Text style={styles.noOfferingsText}>
-                    No subscription options available at this time.
+            {/* Main content */}
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Decorative circle */}
+                <View style={styles.decorativeContainer}>
+                    <View style={styles.decorativeOuter}>
+                        <View style={styles.decorativeInner} />
+                    </View>
+                </View>
+
+                {/* Title section */}
+                <View style={styles.titleSection}>
+                    <Text style={styles.title}>Upgrade for your family</Text>
+                    <Text style={styles.subtitle}>
+                        Protect your loved ones with our most comprehensive safety features.
+                    </Text>
+                </View>
+
+                {/* Features */}
+                <View style={styles.featuresContainer}>
+                    {features.map((feature, index) => {
+                        const Icon = feature.icon;
+                        return (
+                            <View key={index} style={styles.featureCard}>
+                                <View style={styles.featureIcon}>
+                                    <Icon size={24} color={colors.primary} />
+                                </View>
+                                <View style={styles.featureContent}>
+                                    <Text style={styles.featureTitle}>{feature.title}</Text>
+                                    <Text style={styles.featureDescription}>
+                                        {feature.description}
+                                    </Text>
+                                </View>
+                            </View>
+                        );
+                    })}
+                </View>
+
+                {/* Annual plan card */}
+                <Pressable style={styles.planCard} onPress={handlePurchase}>
+                    <View style={styles.bestValueBadge}>
+                        <Text style={styles.bestValueText}>BEST VALUE</Text>
+                    </View>
+                    <View style={styles.planContent}>
+                        <View>
+                            <Text style={styles.planName}>Annual Plan</Text>
+                            <Text style={styles.planSave}>Save 40% annually</Text>
+                        </View>
+                        <View style={styles.planPricing}>
+                            <Text style={styles.planPrice}>{price}</Text>
+                            <Text style={styles.planPeriod}>/ year</Text>
+                        </View>
+                    </View>
+                </Pressable>
+            </ScrollView>
+
+            {/* Footer */}
+            <View style={[styles.footer, { paddingBottom: insets.bottom + 12 }]}>
+                <Pressable
+                    style={styles.proButton}
+                    onPress={handlePurchase}
+                    disabled={purchasing || isLoading}
+                >
+                    {purchasing ? (
+                        <ActivityIndicator color={colors.primaryForeground} />
+                    ) : (
+                        <Text style={styles.proButtonText}>Go PRO</Text>
+                    )}
+                </Pressable>
+
+                <Pressable
+                    style={styles.laterButton}
+                    onPress={() => router.back()}
+                >
+                    <Text style={styles.laterButtonText}>Maybe later</Text>
+                </Pressable>
+
+                <Text style={styles.disclaimer}>
+                    7-day free trial, then auto-renews. Cancel anytime in your subscription settings.
                 </Text>
             </View>
         </View>
@@ -180,142 +185,221 @@ export default function Paywall() {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: colors.background },
-    loadingContainer: {
+    container: {
         flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: colors.background
+        backgroundColor: colors.background,
     },
-    loadingText: {
-        marginTop: spacing[4],
-        fontSize: 16,
-        fontFamily: fonts.sans.medium,
-        color: colors.mutedForeground
+    blurTop: {
+        position: 'absolute',
+        top: -128,
+        right: -128,
+        width: 256,
+        height: 256,
+        backgroundColor: colors.accent,
+        opacity: 0.4,
+        borderRadius: 128,
+    },
+    blurBottom: {
+        position: 'absolute',
+        bottom: 100,
+        left: -96,
+        width: 192,
+        height: 192,
+        backgroundColor: colors.chart1,
+        opacity: 0.05,
+        borderRadius: 96,
     },
     header: {
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         paddingHorizontal: spacing[6],
-        paddingBottom: spacing[4]
+        paddingBottom: spacing[4],
+        zIndex: 10,
     },
-    backButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: colors.card,
-        alignItems: "center",
-        justifyContent: "center"
+    closeButton: {
+        padding: spacing[2],
     },
-    content: { flex: 1, paddingHorizontal: spacing[6] },
-    nativePaywallButton: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: spacing[3],
-        backgroundColor: colors.primary,
-        paddingVertical: spacing[4],
-        borderRadius: radius["2xl"],
-        marginBottom: spacing[6],
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8
+    headerCenter: {
+        flex: 1,
+        alignItems: 'center',
     },
-    nativePaywallText: {
-        fontSize: 16,
-        fontFamily: fonts.sans.bold,
-        color: colors.primaryForeground
+    premiumLabel: {
+        fontSize: 12,
+        fontFamily: fonts.sansBold,
+        letterSpacing: 2,
+        color: `${colors.primary}99`,
     },
-    orText: {
-        textAlign: "center",
-        fontSize: 14,
-        fontFamily: fonts.sans.medium,
+    headerSpacer: {
+        width: 32,
+    },
+    scrollView: {
+        flex: 1,
+    },
+    scrollContent: {
+        paddingHorizontal: spacing[6],
+        paddingBottom: spacing[8],
+    },
+    decorativeContainer: {
+        alignItems: 'center',
+        marginBottom: spacing[8],
+    },
+    decorativeOuter: {
+        width: 120,
+        height: 120,
+        backgroundColor: `${colors.accent}30`,
+        borderRadius: 60,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    decorativeInner: {
+        width: 80,
+        height: 80,
+        backgroundColor: `${colors.accent}50`,
+        borderRadius: 40,
+    },
+    titleSection: {
+        alignItems: 'center',
+        marginBottom: spacing[8],
+    },
+    title: {
+        fontSize: 26,
+        fontFamily: fonts.sansExtraBold,
+        color: colors.foreground,
+        textAlign: 'center',
+        marginBottom: spacing[2],
+    },
+    subtitle: {
+        fontSize: 15,
+        fontFamily: fonts.sans,
         color: colors.mutedForeground,
-        marginBottom: spacing[4]
+        textAlign: 'center',
+        paddingHorizontal: spacing[4],
+        lineHeight: 22,
     },
-    packageCard: {
-        backgroundColor: colors.card,
-        borderRadius: radius["3xl"],
+    featuresContainer: {
+        gap: spacing[4],
+        marginBottom: spacing[8],
+    },
+    featureCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: spacing[4],
+        padding: spacing[4],
+        backgroundColor: `${colors.card}80`,
+        borderRadius: radius['2xl'],
+    },
+    featureIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: radius.xl,
+        backgroundColor: colors.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    featureContent: {
+        flex: 1,
+    },
+    featureTitle: {
+        fontSize: 14,
+        fontFamily: fonts.sansBold,
+        color: colors.foreground,
+        marginBottom: 2,
+    },
+    featureDescription: {
+        fontSize: 12,
+        fontFamily: fonts.sans,
+        color: colors.mutedForeground,
+        lineHeight: 18,
+    },
+    planCard: {
+        backgroundColor: colors.primary,
+        borderRadius: radius['3xl'],
         padding: spacing[5],
-        marginBottom: spacing[4],
         borderWidth: 2,
-        borderColor: colors.border
-    },
-    packageCardPopular: {
         borderColor: colors.primary,
-        backgroundColor: `${colors.primary}05`
+        overflow: 'hidden',
     },
-    popularBadge: {
-        position: "absolute",
-        top: -12,
-        right: spacing[6],
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
+    bestValueBadge: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
         backgroundColor: colors.chart1,
         paddingHorizontal: spacing[3],
         paddingVertical: 4,
-        borderRadius: radius.full
+        borderBottomLeftRadius: radius.xl,
     },
-    popularText: {
+    bestValueText: {
         fontSize: 10,
-        fontFamily: fonts.sans.bold,
-        color: "#fff",
-        letterSpacing: 1
+        fontFamily: fonts.sansBold,
+        color: '#fff',
+        letterSpacing: 0.5,
     },
-    packageContent: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: spacing[3]
+    planContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
-    packageInfo: { flex: 1 },
-    packageTitle: {
+    planName: {
         fontSize: 18,
-        fontFamily: fonts.heading.bold,
-        color: colors.foreground,
-        marginBottom: spacing[1]
+        fontFamily: fonts.sansBold,
+        color: colors.primaryForeground,
     },
-    packageDesc: {
+    planSave: {
+        fontSize: 13,
+        fontFamily: fonts.sans,
+        color: `${colors.primaryForeground}B3`,
+    },
+    planPricing: {
+        alignItems: 'flex-end',
+    },
+    planPrice: {
+        fontSize: 22,
+        fontFamily: fonts.sansExtraBold,
+        color: colors.primaryForeground,
+    },
+    planPeriod: {
         fontSize: 12,
-        fontFamily: fonts.sans.regular,
-        color: colors.mutedForeground
+        fontFamily: fonts.sans,
+        color: `${colors.primaryForeground}B3`,
     },
-    packagePricing: { alignItems: "flex-end" },
-    packagePrice: {
-        fontSize: 24,
-        fontFamily: fonts.heading.bold,
-        color: colors.primary
+    footer: {
+        paddingHorizontal: spacing[6],
+        paddingTop: spacing[4],
+        backgroundColor: `${colors.background}CC`,
     },
-    packagePeriod: {
-        fontSize: 12,
-        fontFamily: fonts.sans.regular,
-        color: colors.mutedForeground
+    proButton: {
+        backgroundColor: colors.primary,
+        paddingVertical: spacing[4],
+        borderRadius: radius.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: colors.primary,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
     },
-    selectButton: {
-        backgroundColor: colors.muted,
+    proButtonText: {
+        fontSize: 18,
+        fontFamily: fonts.sansBold,
+        color: colors.primaryForeground,
+    },
+    laterButton: {
         paddingVertical: spacing[3],
-        borderRadius: radius["xl"],
-        alignItems: "center"
+        alignItems: 'center',
     },
-    selectButtonPopular: { backgroundColor: colors.primary },
-    selectButtonText: {
+    laterButtonText: {
         fontSize: 14,
-        fontFamily: fonts.sans.bold,
-        color: colors.foreground
-    },
-    selectButtonTextPopular: { color: colors.primaryForeground },
-    noOfferings: {
-        flex: 1,
-        alignItems: "center",
-        justifyContent: "center",
-        paddingHorizontal: spacing[8]
-    },
-    noOfferingsText: {
-        fontSize: 16,
-        fontFamily: fonts.sans.medium,
+        fontFamily: fonts.sansSemiBold,
         color: colors.mutedForeground,
-        textAlign: "center"
-    }
+    },
+    disclaimer: {
+        fontSize: 10,
+        fontFamily: fonts.sans,
+        color: `${colors.mutedForeground}99`,
+        textAlign: 'center',
+        paddingHorizontal: spacing[8],
+        marginTop: spacing[4],
+        lineHeight: 14,
+    },
 });
