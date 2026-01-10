@@ -49,8 +49,7 @@ export default function FamilyProfiles() {
     };
 
     const handleAddMember = () => {
-        // TODO: Navigate to add family member screen
-        Alert.alert('Coming Soon', 'Add family member feature will be available soon!');
+        router.push('/add-family-member');
     };
 
     return (
