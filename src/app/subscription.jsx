@@ -35,14 +35,7 @@ export default function Subscription() {
     ];
 
     const handleStartTrial = () => {
-        Alert.alert(
-            'Start Free Trial',
-            'Start your 7-day free trial and unlock all premium features!',
-            [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Continue', onPress: () => router.push('/payment-flow') }
-            ]
-        );
+        router.push('/paywall');
     };
 
     return (
