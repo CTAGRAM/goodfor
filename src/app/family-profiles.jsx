@@ -1,4 +1,4 @@
-import { useState, useEffect } from '
+import { useState, useEffect } from 'react';
 import {
     View,
     Text,
@@ -55,7 +55,7 @@ export default function FamilyProfiles() {
 
     return (
         <View style={styles.container}>
-            <StatusBar style=\"dark\" />
+            <StatusBar style="dark" />
             <View style={styles.blurTop} />
             <View style={styles.blurBottom} />
 

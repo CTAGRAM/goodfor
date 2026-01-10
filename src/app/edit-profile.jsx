@@ -80,7 +80,7 @@ export default function EditProfile() {
 
     return (
         <View style={styles.container}>
-            <StatusBar style=\"dark\" />
+            <StatusBar style="dark" />
             <View style={styles.blurTop} />
             <View style={styles.blurBottom} />
 
@@ -133,9 +133,9 @@ export default function EditProfile() {
                             style={styles.input}
                             value={name}
                             onChangeText={setName}
-                            placeholder=\"Enter your name\"
-                        placeholderTextColor={colors.mutedForeground}
-            />
+                            placeholder="Enter your name"
+                            placeholderTextColor={colors.mutedForeground}
+                        />
                     </View>
 
                     <View style={styles.inputGroup}>
