@@ -33,10 +33,8 @@ export default function Alternatives() {
             console.log('[Alternatives] Loading for product:', product.barcode);
 
             // Use Edge Function to get alternatives
-            const alts = await getAlternativesEdge(
-                product.barcode,
-                product.categories?.[0] || product.category
-            );
+            // Pass the full product object so the helper can extract everything needed (v4)
+            const alts = await getAlternativesEdge(product);
 
             console.log('[Alternatives] Got', alts.length, 'alternatives from Edge Function');
 
@@ -47,8 +45,10 @@ export default function Alternatives() {
                 brand: alt.brand,
                 imageUrl: alt.imageUrl,
                 score: alt.safetyScore || 75,
-                badge: alt.safetyLevel === 'safe' ? 'Top Match' : index === 0 ? 'Eco-Friendly' : 'Popular Choice',
-                reasons: [alt.reason || 'Better safety score'],
+                badge: alt.safetyLevel === 'safe' ? 'Top Match' :
+                    (alt.nutriScore === 'a' || alt.nutriScore === 'b') ? 'Healthy Choice' :
+                        'Alternative',
+                reasons: [alt.reason || alt.improvement || 'Better safety score'],
             }));
 
             setAlternatives(mapped);
