@@ -138,10 +138,18 @@ export default function ProductSummary() {
                         </View>
                     </Pressable>
 
-                    {/* Environmental note */}
-                    <View style={styles.envNote}>
-                        <Leaf size={14} color={colors.mutedForeground} />
-                        <Text style={styles.envNoteText}>Environmental info available</Text>
+                    {/* Environmental Badge + Analysis Button */}
+                    <View style={styles.bottomSection}>
+                        <View style={styles.envBadge}>
+                            <Leaf size={14} color={colors.mutedForeground} />
+                            <Text style={styles.envBadgeText}>Environmental info available</Text>
+                        </View>
+                        <Pressable
+                            style={styles.analysisButton}
+                            onPress={() => router.push({ pathname: '/safety-details', params: { productData } })}
+                        >
+                            <Text style={styles.analysisButtonText}>📊 Detailed Score Analysis</Text>
+                        </Pressable>
                     </View>
                 </View>
 
@@ -231,8 +239,11 @@ const styles = StyleSheet.create({
     safetyDescription: { fontSize: 14, fontFamily: fonts.sans.medium, color: colors.mutedForeground, textAlign: 'center' },
     tapHint: { flexDirection: 'row', alignItems: 'center', marginTop: spacing[3], gap: spacing[1] },
     tapHintText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
-    envNote: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginTop: spacing[4], paddingTop: spacing[4], borderTopWidth: 1, borderTopColor: `${colors.border}30` },
-    envNoteText: { fontSize: 12, fontFamily: fonts.sans.medium, color: colors.mutedForeground },
+    bottomSection: { marginTop: spacing[4], paddingTop: spacing[4], borderTopWidth: 1, borderTopColor: `${colors.border}30`, gap: spacing[4] },
+    envBadge: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], backgroundColor: colors.muted, alignSelf: 'flex-start', paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: radius.full },
+    envBadgeText: { fontSize: 12, fontFamily: fonts.sans.medium, color: colors.mutedForeground },
+    analysisButton: { backgroundColor: colors.secondary, paddingVertical: spacing[3], borderRadius: radius.xl, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 4, borderWidth: 1, borderColor: `${colors.border}40` },
+    analysisButtonText: { fontSize: 14, fontFamily: fonts.sans.medium, color: colors.secondaryForeground },
     familyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2], marginBottom: spacing[8] },
     familyAvatars: { flexDirection: 'row' },
     avatar: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.background },
