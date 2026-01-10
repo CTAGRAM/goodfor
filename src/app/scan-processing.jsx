@@ -107,9 +107,15 @@ export default function ScanProcessing() {
                 ingredients_text: product.ingredientsText,
                 allergens_tags: product.allergens,
                 nutriments: product.nutriments,
+                category: product.categories?.[0] || 'Food Product',
                 safety_level: safetyAnalysis.safety,
                 safety_score: safetyAnalysis.safeScore,
                 safety_flags: safetyAnalysis.issues.map(i => i.reason),
+                safety_details: {
+                    issues: safetyAnalysis.issues,
+                    ageGroup: safetyAnalysis.ageGroup,
+                },
+                alternatives_data: null,
             });
         } catch (e) {
             console.error('Save error:', e);

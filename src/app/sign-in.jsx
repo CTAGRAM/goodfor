@@ -104,7 +104,8 @@ export default function SignIn() {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            behavior="padding"
+            keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
         >
             <StatusBar style="dark" />
 
@@ -127,7 +128,7 @@ export default function SignIn() {
                 style={styles.scrollView}
                 contentContainerStyle={[
                     styles.scrollContent,
-                    { paddingBottom: insets.bottom + 180 }
+                    { paddingBottom: insets.bottom + 300 }
                 ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
