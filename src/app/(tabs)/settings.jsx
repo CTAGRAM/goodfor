@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, Image, StyleSheet, Switch, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
@@ -12,6 +13,11 @@ import { signOut } from '@/lib/supabaseAuth';
 export default function Settings() {
   const router = useRouter();
   const { profile } = useAuth();
+
+  // State for toggles
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [envImpact, setEnvImpact] = useState(true);
+  const [businessInsights, setBusinessInsights] = useState(false);
 
   const getInitials = (name) => {
     if (!name) return '?';
@@ -147,7 +153,8 @@ export default function Settings() {
                 </View>
               </View>
               <Switch
-                value={false}
+                value={reduceMotion}
+                onValueChange={setReduceMotion}
                 trackColor={{ false: colors.muted, true: colors.primary }}
                 thumbColor={colors.card}
               />
@@ -167,7 +174,8 @@ export default function Settings() {
                 <Text style={styles.settingLabel}>Environmental impact indicators</Text>
               </View>
               <Switch
-                value={true}
+                value={envImpact}
+                onValueChange={setEnvImpact}
                 trackColor={{ false: colors.muted, true: colors.primary }}
                 thumbColor={colors.card}
               />
@@ -180,7 +188,8 @@ export default function Settings() {
                 <Text style={styles.settingLabel}>Business-level insights</Text>
               </View>
               <Switch
-                value={false}
+                value={businessInsights}
+                onValueChange={setBusinessInsights}
                 trackColor={{ false: colors.muted, true: colors.primary }}
                 thumbColor={colors.card}
               />
