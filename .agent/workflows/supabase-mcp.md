@@ -1,0 +1,13 @@
+---
+description: exact mcp to use for supabase 
+---
+
+use this supabase to call for tools :
+
+{
+    "mcpServers": {
+        "supabase": {
+            "url": "https://mcp.supabase.com/mcp?project_ref=yiilubsznpyiswpvqyhy&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cbranching%2Cfunctions%2Cstorage"
+        }
+    }
+}

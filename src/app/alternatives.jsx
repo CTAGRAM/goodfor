@@ -12,16 +12,28 @@ import {
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { getAlternativesEdge } from "@/lib/edgeFunctions";
+import { getAlternatives as getAlternativesLocal } from "@/lib/openFoodFacts";
+import { useAuth } from "@/contexts/AuthContext";
 import { useState, useEffect } from "react";
 
 export default function Alternatives() {
     const { productData } = useLocalSearchParams();
     const router = useRouter();
     const insets = useSafeAreaInsets();
+    const { profile } = useAuth();
     const [alternatives, setAlternatives] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    const product = JSON.parse(productData);
+    // Parse with defaults
+    let product = {};
+    try {
+        product = JSON.parse(productData || '{}');
+    } catch (e) {
+        console.error('Failed to parse product data:', e);
+    }
+
+    // Detect if this is a beauty product
+    const isBeautyProduct = product.productType === 'BEAUTY' || product.safetyAnalysis?.productType === 'BEAUTY';
 
     useEffect(() => {
         loadAlternatives();
@@ -30,25 +42,96 @@ export default function Alternatives() {
     const loadAlternatives = async () => {
         try {
             setLoading(true);
-            console.log('[Alternatives] Loading for product:', product.barcode);
+            console.log('[Alternatives] Loading for product:', product.barcode, 'Type:', isBeautyProduct ? 'BEAUTY' : 'FOOD');
 
-            // Use Edge Function to get alternatives
-            // Pass the full product object so the helper can extract everything needed (v4)
-            const alts = await getAlternativesEdge(product);
+            let alts = [];
 
-            console.log('[Alternatives] Got', alts.length, 'alternatives from Edge Function');
+            if (isBeautyProduct) {
+                // Use OpenBeautyFacts for cosmetics
+                console.log('[Alternatives] Using OpenBeautyFacts for beauty product...');
+                const { getBeautyAlternatives } = await import('@/lib/openBeautyFacts');
+                alts = await getBeautyAlternatives(product, 5);
 
-            // Map to display format
+                // Map to display format
+                const mapped = alts.map((alt, index) => ({
+                    barcode: alt.barcode,
+                    name: alt.name,
+                    brand: alt.brand,
+                    imageUrl: alt.imageUrl,
+                    score: alt.safetyScore || 70,
+                    badge: index === 0 ? 'Top Match' :
+                        alt.isOrganic ? 'Organic' :
+                            alt.isVegan ? 'Vegan' :
+                                alt.isCrueltyFree ? 'Cruelty-Free' : 'Alternative',
+                    reasons: getBeautyReasons(alt, product),
+                }));
+                setAlternatives(mapped);
+                return;
+            }
+
+            // FOOD PRODUCT: Log product data for debugging
+            console.log('[Alternatives] Food product data:', {
+                barcode: product.barcode,
+                name: product.name,
+                categories: product.categories,
+                category: product.category || product.safetyAnalysis?.category,
+                nutriScore: product.nutriScore || product.safetyAnalysis?.nutriScore?.grade,
+            });
+
+            // Try Edge Function first
+            try {
+                alts = await getAlternativesEdge(product);
+                console.log('[Alternatives] Got', alts.length, 'alternatives from Edge Function');
+            } catch (edgeError) {
+                console.log('[Alternatives] Edge Function failed:', edgeError.message);
+            }
+
+            // Fallback to OpenFoodFacts direct API if edge function returns empty
+            if (alts.length === 0) {
+                console.log('[Alternatives] Using OpenFoodFacts fallback for:', product.name);
+                console.log('[Alternatives] Fallback categories:', product.categories);
+                alts = await getAlternativesLocal(product, 5, { country: profile?.region || 'US' });
+                console.log('[Alternatives] Got', alts.length, 'alternatives from OpenFoodFacts');
+
+                // Map OpenFoodFacts format to display format with better scoring
+                const mapped = alts.map((alt, index) => {
+                    // Calculate score based on nutriscore grade
+                    const nutriScoreMap = { 'a': 95, 'b': 85, 'c': 70, 'd': 55, 'e': 40 };
+                    const baseScore = nutriScoreMap[alt.nutriScore?.toLowerCase()] || 65;
+
+                    // Adjust for additives (fewer is better)
+                    const additiveBonus = Math.max(0, 5 - (alt.additives?.length || 0));
+
+                    return {
+                        barcode: alt.barcode,
+                        name: alt.name,
+                        brand: alt.brand,
+                        imageUrl: alt.imageUrl,
+                        score: Math.min(100, baseScore + additiveBonus),
+                        nutriScore: alt.nutriScore,
+                        badge: index === 0 ? 'Top Match' :
+                            alt.nutriScore === 'a' ? 'Excellent' :
+                                alt.nutriScore === 'b' ? 'Healthy Choice' : 'Alternative',
+                        reasons: getReasons(alt, product),
+                    };
+                });
+                setAlternatives(mapped);
+                return;
+            }
+
+            // Map Edge Function format with improved badges
             const mapped = alts.map((alt, index) => ({
                 barcode: alt.barcode,
                 name: alt.name,
                 brand: alt.brand,
                 imageUrl: alt.imageUrl,
-                score: alt.safetyScore || 75,
-                badge: alt.safetyLevel === 'safe' ? 'Top Match' :
-                    (alt.nutriScore === 'a' || alt.nutriScore === 'b') ? 'Healthy Choice' :
-                        'Alternative',
-                reasons: [alt.reason || alt.improvement || 'Better safety score'],
+                score: alt.safetyScore || alt.safety_score || 75,
+                nutriScore: alt.nutriScore || alt.nutri_score,
+                badge: index === 0 ? 'Top Match' :
+                    alt.safetyLevel === 'safe' || alt.safety_level === 'safe' ? 'Safe Choice' :
+                        (alt.nutriScore === 'a' || alt.nutriScore === 'b') ? 'Healthy Choice' :
+                            'Alternative',
+                reasons: alt.reasons || [alt.reason || alt.improvement || 'Better nutritional profile'],
             }));
 
             setAlternatives(mapped);
@@ -60,28 +143,102 @@ export default function Alternatives() {
         }
     };
 
+    // Beauty-specific reasons
+    function getBeautyReasons(altProduct, originalProduct) {
+        const reasons = [];
+
+        // Check positive attributes
+        if (altProduct.isOrganic && !originalProduct.isOrganic) {
+            reasons.push('Certified organic');
+        }
+        if (altProduct.isVegan && !originalProduct.isVegan) {
+            reasons.push('Vegan formulation');
+        }
+        if (altProduct.isCrueltyFree && !originalProduct.isCrueltyFree) {
+            reasons.push('Cruelty-free');
+        }
+
+        // Ingredients comparison
+        const altIngredients = (altProduct.ingredientsText || '').toLowerCase();
+        const origIngredients = (originalProduct.ingredientsText || '').toLowerCase();
+
+        if (!altIngredients.includes('paraben') && origIngredients.includes('paraben')) {
+            reasons.push('Paraben-free');
+        }
+        if (!altIngredients.includes('sulfate') && origIngredients.includes('sulfate')) {
+            reasons.push('Sulfate-free');
+        }
+        if (!altIngredients.includes('fragrance') && !altIngredients.includes('parfum') &&
+            (origIngredients.includes('fragrance') || origIngredients.includes('parfum'))) {
+            reasons.push('Fragrance-free');
+        }
+
+        // Fallback
+        if (reasons.length === 0) {
+            reasons.push('Cleaner ingredient profile');
+            reasons.push('Better safety score');
+        }
+
+        return reasons.slice(0, 2);
+    }
+
     function getReasons(altProduct, originalProduct) {
         const reasons = [];
 
-        // Compare nutriscore
-        if (altProduct.nutriScore && altProduct.nutriScore < (originalProduct.nutriScore || 'e')) {
-            reasons.push('Better nutritional profile');
+        // Nutri-Score comparison (a < b < c < d < e alphabetically = better)
+        const altNutri = altProduct.nutriScore?.toLowerCase() || 'z';
+        const origNutri = originalProduct.nutriScore?.toLowerCase() || originalProduct.safetyAnalysis?.nutriScore?.grade?.toLowerCase() || 'z';
+        if (altNutri < origNutri) {
+            reasons.push('Better Nutri-Score grade');
         }
 
         // Check additives
-        if (altProduct.additives.length < (originalProduct.additives?.length || 999)) {
+        const altAdditives = altProduct.additives?.length || 0;
+        const origAdditives = originalProduct.additives?.length || 999;
+        if (altAdditives < origAdditives && origAdditives !== 999) {
             reasons.push('Fewer additives');
         }
 
         // Check sugars
-        if (altProduct.nutriments.sugars < (originalProduct.nutriments?.sugars || 999)) {
-            reasons.push('Lower sugar content');
+        const altSugars = altProduct.nutriments?.sugars || 0;
+        const origSugars = originalProduct.nutriments?.sugars || 999;
+        if (altSugars < origSugars && origSugars !== 999) {
+            if (altSugars < origSugars * 0.7) {
+                reasons.push('Significantly lower sugar');
+            } else {
+                reasons.push('Lower sugar content');
+            }
         }
 
-        // Fallback reasons
+        // Check sodium
+        const altSodium = altProduct.nutriments?.sodium || 0;
+        const origSodium = originalProduct.nutriments?.sodium || 999;
+        if (altSodium < origSodium && origSodium !== 999) {
+            reasons.push('Lower sodium content');
+        }
+
+        // Check NOVA group (1-4, lower is less processed)
+        const altNova = altProduct.novaGroup || 5;
+        const origNova = originalProduct.novaGroup || 5;
+        if (altNova < origNova && origNova !== 5) {
+            reasons.push('Less processed');
+        }
+
+        // Add positive attributes if we don't have enough reasons yet
+        if (reasons.length < 2) {
+            if (altProduct.nutriScore === 'a') {
+                reasons.push('Excellent nutritional profile');
+            } else if (altProduct.nutriScore === 'b') {
+                reasons.push('Good nutritional balance');
+            }
+        }
+
+        // Final fallback reasons
         if (reasons.length === 0) {
-            reasons.push('No synthetic pesticides or additives');
-            reasons.push('Naturally processed');
+            if (altProduct.novaGroup && altProduct.novaGroup <= 2) {
+                reasons.push('Minimally processed');
+            }
+            reasons.push('Better alternative in category');
         }
 
         return reasons.slice(0, 2);
@@ -138,7 +295,7 @@ export default function Alternatives() {
                                             {alt.imageUrl ? (
                                                 <Image source={{ uri: alt.imageUrl }} style={styles.altImageImg} />
                                             ) : (
-                                                <Text style={styles.altImagePlaceholder}>🥗</Text>
+                                                <Text style={styles.altImagePlaceholder}>ALT</Text>
                                             )}
                                         </View>
                                         <View style={styles.altInfo}>

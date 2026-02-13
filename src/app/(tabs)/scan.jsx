@@ -12,9 +12,12 @@ import {
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 
+import { useAuth } from "@/contexts/AuthContext";
+
 export default function Scan() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { profile } = useAuth();
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
@@ -32,6 +35,32 @@ export default function Scan() {
 
   const handleBarCodeScanned = async ({ type, data }) => {
     if (scanned) return;
+
+    // Check if profile is completed
+    if (profile && !profile.is_profile_completed) {
+      setScanned(true); // Pause scanning
+      Alert.alert(
+        'Complete Your Profile',
+        'To provide accurate safety analysis, we need a few details about you.',
+        [
+          {
+            text: 'Create Profile',
+            onPress: () => {
+              router.push('/edit-profile');
+              // Reset scanned state after navigation so it works when they come back (if they cancel)
+              // But actually create profile will redirect to home.
+              setScanned(false);
+            }
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => setScanned(false)
+          }
+        ]
+      );
+      return;
+    }
 
     setScanned(true);
 
@@ -131,12 +160,12 @@ export default function Scan() {
           </Text>
         </View>
 
-        {/* Footer */}
-        <View style={[styles.footer, { paddingBottom: insets.bottom + 24 }]}>
+        {/* Footer - positioned above tab bar */}
+        <View style={[styles.footer, { paddingBottom: insets.bottom + 100 }]}>
           <View style={styles.infoCard}>
             <AlertCircle size={16} color={colors.primary} />
             <Text style={styles.infoText}>
-              Make sure the barcode is well-lit and steady
+              Make sure the barcode is well-lit and steady for best results
             </Text>
           </View>
         </View>

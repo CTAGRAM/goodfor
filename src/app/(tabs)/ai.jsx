@@ -8,13 +8,22 @@ import {
     AlertTriangle,
     Shield,
     ArrowRight,
-    MessageCircle
+    MessageCircle,
+    User
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function AI() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
+    const { profile, activeFamilyMember } = useAuth();
+
+    const displayProfile = activeFamilyMember ? {
+        avatar: activeFamilyMember.avatar_url,
+    } : {
+        avatar: profile?.avatar_url,
+    };
 
     const suggestions = [
         {
@@ -51,10 +60,16 @@ export default function AI() {
                     resizeMode="contain"
                 />
                 <View style={styles.profileContainer}>
-                    <Image
-                        source={{ uri: "https://randomuser.me/api/portraits/women/44.jpg" }}
-                        style={styles.profileImage}
-                    />
+                    {displayProfile.avatar ? (
+                        <Image
+                            source={{ uri: displayProfile.avatar }}
+                            style={styles.profileImage}
+                        />
+                    ) : (
+                        <View style={[styles.profileImage, styles.profileFallback]}>
+                            <User size={24} color={colors.primary} />
+                        </View>
+                    )}
                     <View style={styles.statusIndicator} />
                 </View>
             </View>
@@ -64,7 +79,7 @@ export default function AI() {
                 style={styles.scrollView}
                 contentContainerStyle={[
                     styles.scrollContent,
-                    { paddingBottom: insets.bottom + 180 }
+                    { paddingBottom: insets.bottom + 220 }
                 ]}
                 showsVerticalScrollIndicator={false}
             >
@@ -105,8 +120,8 @@ export default function AI() {
                 </View>
             </ScrollView>
 
-            {/* Start Conversation Button */}
-            <View style={[styles.buttonContainer, { bottom: insets.bottom + 100 }]}>
+            {/* Start Conversation Button - positioned above tab bar */}
+            <View style={[styles.buttonContainer, { bottom: insets.bottom + 90 }]}>
                 <TouchableOpacity
                     style={styles.startButton}
                     onPress={() => router.push("/ai-chat")}
@@ -181,6 +196,11 @@ const styles = StyleSheet.create({
         borderRadius: 24,
         borderWidth: 2,
         borderColor: "#FFFFFF",
+    },
+    profileFallback: {
+        backgroundColor: colors.secondary,
+        alignItems: "center",
+        justifyContent: "center",
     },
     statusIndicator: {
         position: "absolute",

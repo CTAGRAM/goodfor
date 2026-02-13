@@ -1,21 +1,44 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { View, Text, StyleSheet, Animated, Easing } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Leaf, ShieldCheck } from "lucide-react-native";
+import { Leaf, ShieldCheck, Sparkles } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
-import { getProductByBarcode } from "@/lib/openFoodFacts";
+import { getProductByBarcode, PRODUCT_TYPES } from "@/lib/productRouter";
 import { analyzeProductSafety, yearsToMonths } from "@/lib/productSafety";
+import { analyzeCosmeticSafety } from "@/lib/cosmeticSafety";
 import { useAuth } from "@/contexts/AuthContext";
+import { useRevenueCat } from "@/contexts/RevenueCatContext";
 import { supabase } from "@/lib/supabaseAuth";
+import UpgradeModal from "@/components/UpgradeModal";
+
+const FREE_TIER_SCAN_LIMIT = 10;
+const SOFT_PROMPT_AT = 5;
+
+// Convert age group label to approximate months for family members
+function getAgeMonthsFromGroup(ageGroup) {
+    const ageGroupMap = {
+        'infant': 6,       // 0-12 months
+        'toddler': 24,     // 1-3 years
+        'child': 84,       // 4-12 years (7 years avg)
+        'teen': 180,       // 13-18 years (15 years avg)
+        'adult': 360,      // 18-65 years (30 years avg)
+        'elderly': 780,    // 65+ years
+    };
+    return ageGroupMap[ageGroup?.toLowerCase()] || null;
+}
 
 export default function ScanProcessing() {
     const { barcode } = useLocalSearchParams();
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { user, profile } = useAuth();
+    const { user, profile, activeFamilyMember } = useAuth();
+    const { isPro } = useRevenueCat();
     const [status, setStatus] = useState('Checking ingredients...');
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+    const [scanCount, setScanCount] = useState(0);
+    const [upgradeModalType, setUpgradeModalType] = useState('scanLimit');
 
     // Animations
     const spinAnim = new Animated.Value(0);
@@ -64,6 +87,42 @@ export default function ScanProcessing() {
 
     const processBarcode = async () => {
         try {
+            // Check scan limit for free tier users
+            // isPro from RevenueCat OR is_premium from database (for testing/manual grants)
+            const isUserPremium = isPro || profile?.is_premium === true;
+
+            if (!isUserPremium && user?.id) {
+                setStatus('Checking usage...');
+                const startOfMonth = new Date();
+                startOfMonth.setDate(1);
+                startOfMonth.setHours(0, 0, 0, 0);
+
+                const { count, error: countError } = await supabase
+                    .from('scans')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('user_id', user.id)
+                    .gte('scanned_at', startOfMonth.toISOString());
+
+                if (!countError) {
+                    const currentCount = count || 0;
+                    setScanCount(currentCount);
+
+                    // Hard limit reached
+                    if (currentCount >= FREE_TIER_SCAN_LIMIT) {
+                        console.log('[ScanProcessing] Free tier limit reached:', currentCount);
+                        setUpgradeModalType('scanLimit');
+                        setShowUpgradeModal(true);
+                        return; // Stop processing
+                    }
+
+                    // Soft prompt at 5 scans (show after processing completes)
+                    if (currentCount === SOFT_PROMPT_AT) {
+                        // Will show soft prompt after scan completes
+                        setUpgradeModalType('soft');
+                    }
+                }
+            }
+
             setStatus('Looking up product...');
             const product = await getProductByBarcode(barcode);
 
@@ -76,11 +135,64 @@ export default function ScanProcessing() {
             }
 
             setStatus('Analysing safety...');
-            const ageMonths = profile?.age_years ? yearsToMonths(profile.age_years) : 360;
-            const safetyAnalysis = analyzeProductSafety(product, ageMonths);
+            // Get age from active family member or profile
+            const ageSource = activeFamilyMember || profile;
+            const ageMonths = ageSource?.age_years
+                ? yearsToMonths(ageSource.age_years)
+                : getAgeMonthsFromGroup(ageSource?.age_group) || 360;
+
+            // Get user's personal allergies and dietary restrictions for personalized scoring
+            const userPreferences = {
+                allergies: activeFamilyMember?.allergies || profile?.allergies || [],
+                dietaryRestrictions: activeFamilyMember?.dietary_restrictions || profile?.dietary_restrictions || [],
+                healthConditions: activeFamilyMember?.health_conditions || profile?.health_conditions || [],
+                isPregnant: ageSource?.is_pregnant || false,
+                isBreastfeeding: ageSource?.is_breastfeeding || false,
+                ageMonths: ageMonths,
+                // Phase 3: Cosmetic personalization fields
+                skinType: ageSource?.skin_type || 'normal',
+                skinConditions: ageSource?.skin_conditions || [],
+                cosmeticAllergens: ageSource?.cosmetic_allergens || [],
+            };
+
+            console.log('[ScanProcessing] Analyzing with preferences:', {
+                ageMonths,
+                productType: product.productType,
+                allergies: userPreferences.allergies,
+                dietary: userPreferences.dietaryRestrictions,
+                cosmeticPrefs: {
+                    skinType: userPreferences.skinType,
+                    skinConditions: userPreferences.skinConditions,
+                    cosmeticAllergens: userPreferences.cosmeticAllergens,
+                }
+            });
+
+            // Route to appropriate safety analysis based on product type
+            let safetyAnalysis;
+            console.log('[ScanProcessing] Product type check:', product.productType, '===', PRODUCT_TYPES.BEAUTY, '?', product.productType === PRODUCT_TYPES.BEAUTY);
+
+            if (product.productType === PRODUCT_TYPES.BEAUTY) {
+                console.log('[ScanProcessing] ✓ Routing to COSMETIC analysis');
+                setStatus('Analysing cosmetic safety...');
+                safetyAnalysis = analyzeCosmeticSafety(product, userPreferences);
+                console.log('[ScanProcessing] Cosmetic analysis result:', {
+                    safety: safetyAnalysis.safety,
+                    score: safetyAnalysis.safeScore,
+                    issuesCount: safetyAnalysis.issues?.length,
+                    hasPillars: !!safetyAnalysis.pillars,
+                    hasPersonalConcerns: safetyAnalysis.personalConcerns?.length > 0
+                });
+            } else {
+                console.log('[ScanProcessing] → Routing to FOOD analysis');
+                // Default to food analysis
+                safetyAnalysis = analyzeProductSafety(product, ageMonths, userPreferences);
+            }
 
             setStatus('Saving results...');
             await saveScanToHistory(product, safetyAnalysis);
+
+            // Small delay to ensure database write is committed before navigation
+            await new Promise(resolve => setTimeout(resolve, 200));
 
             router.replace({
                 pathname: '/product-summary',
@@ -105,7 +217,7 @@ export default function ScanProcessing() {
         try {
             console.log('[ScanSave] Saving scan for user:', userId);
 
-            // Step 1: Upsert product to products table
+            // Step 1: Upsert product to products table with COMPLETE data
             const { data: productData, error: productError } = await supabase
                 .from('products')
                 .upsert({
@@ -114,11 +226,24 @@ export default function ScanProcessing() {
                     brand: product.brand,
                     category: product.categories?.[0] || 'Food Product',
                     image_url: product.imageUrl,
+                    // Store complete ingredients data for history reconstruction
                     ingredients: {
-                        text: product.ingredientsText,
+                        text: product.ingredientsText || '',
                         allergens: product.allergens || [],
+                        additives: product.additives || [],
+                        traces: product.traces || [],
                     },
-                    nutrition_facts: product.nutriments || {},
+                    // Store complete nutrition facts
+                    nutrition_facts: {
+                        energy_kcal: product.nutriments?.energy_kcal || 0,
+                        sugars: product.nutriments?.sugars || 0,
+                        sodium: product.nutriments?.sodium || 0,
+                        salt: product.nutriments?.salt || 0,
+                        saturated_fat: product.nutriments?.saturated_fat || 0,
+                        proteins: product.nutriments?.proteins || 0,
+                        fiber: product.nutriments?.fiber || 0,
+                        caffeine: product.nutriments?.caffeine || 0,
+                    },
                 }, {
                     onConflict: 'barcode',
                     ignoreDuplicates: false,
@@ -131,29 +256,91 @@ export default function ScanProcessing() {
                 return;
             }
 
-            console.log('[ScanSave] Product saved:', productData.id);
 
-            // Step 2: Insert scan record
-            const { error: scanError } = await supabase
+            // Check if already scanned recently by THIS user/profile
+            let query = supabase
                 .from('scans')
-                .insert({
-                    user_id: userId,
-                    product_id: productData.id,
-                    family_member_id: null, // TODO: Add family member selection
-                    safety_score: Math.round(safetyAnalysis.safeScore),
-                    safety_level: safetyAnalysis.safety,
-                    category: product.categories?.[0] || 'Food Product',
-                    safety_details: {
-                        issues: safetyAnalysis.issues,
-                        ageGroup: safetyAnalysis.ageGroup,
-                    },
-                    alternatives_data: null,
-                });
+                .select('id, scan_count')
+                .eq('user_id', userId)
+                .eq('product_id', productData.id);
 
-            if (scanError) {
-                console.error('[ScanSave] Scan insert error:', scanError);
+            if (activeFamilyMember) {
+                query = query.eq('family_member_id', activeFamilyMember.id);
             } else {
-                console.log('[ScanSave] Scan saved successfully');
+                query = query.is('family_member_id', null);
+            }
+
+            const { data: existingScan, error: checkError } = await query.maybeSingle();
+
+            if (checkError) {
+                console.error('[ScanSave] Check existing scan error:', checkError);
+            }
+
+            // Prepare comprehensive safety_details object for storage
+            const safetyDetailsToStore = {
+                // Core safety data
+                issues: safetyAnalysis.issues || [],
+                ageAppropriate: safetyAnalysis.ageAppropriate,
+                ageGroup: safetyAnalysis.ageGroup,
+
+                // Enhanced Cosmetic Data (Phase 2/3)
+                pillars: safetyAnalysis.pillars,
+                personalConcerns: safetyAnalysis.personalConcerns,
+                productType: product.productType || 'FOOD', // Store type context
+
+                // Full Nutri-Score data for UI reconstruction
+                nutriScore: safetyAnalysis.nutriScore ? {
+                    rawScore: safetyAnalysis.nutriScore.rawScore,
+                    grade: safetyAnalysis.nutriScore.grade,
+                    gradeColor: safetyAnalysis.nutriScore.gradeColor,
+                    breakdown: safetyAnalysis.nutriScore.breakdown,
+                } : null,
+                // Eco-Score and NOVA for environmental info
+                ecoScore: safetyAnalysis.ecoScore,
+                novaGroup: safetyAnalysis.novaGroup,
+                // Personal matches
+                hasPersonalAllergenMatch: safetyAnalysis.hasPersonalAllergenMatch,
+                matchedAllergens: safetyAnalysis.matchedAllergens,
+            };
+
+            if (existingScan) {
+                // Update existing scan - increment count and update timestamp
+                const { error: updateError } = await supabase
+                    .from('scans')
+                    .update({
+                        scanned_at: new Date().toISOString(),
+                        scan_count: (existingScan.scan_count || 1) + 1,
+                        safety_score: Math.round(safetyAnalysis.safeScore),
+                        safety_level: safetyAnalysis.safety,
+                        safety_details: safetyDetailsToStore,
+                    })
+                    .eq('id', existingScan.id);
+
+                if (updateError) {
+                    console.error('[ScanSave] Update scan error:', updateError);
+                } else {
+                    console.log('[ScanSave] Updated existing scan, count:', (existingScan.scan_count || 1) + 1);
+                }
+            } else {
+                // Insert new scan record
+                const { error: scanError } = await supabase
+                    .from('scans')
+                    .insert({
+                        user_id: userId,
+                        product_id: productData.id,
+                        family_member_id: activeFamilyMember ? activeFamilyMember.id : null,
+                        safety_score: Math.round(safetyAnalysis.safeScore),
+                        safety_level: safetyAnalysis.safety,
+                        category: product.categories?.[0] || 'Food Product',
+                        scan_count: 1,
+                        safety_details: safetyDetailsToStore,
+                    });
+
+                if (scanError) {
+                    console.error('[ScanSave] Insert scan error:', scanError);
+                } else {
+                    console.log('[ScanSave] New scan saved successfully');
+                }
             }
         } catch (e) {
             console.error('[ScanSave] Exception:', e);
@@ -207,6 +394,21 @@ export default function ScanProcessing() {
                     <Text style={styles.footerText}>VERIFYING AGAINST GLOBAL STANDARDS</Text>
                 </View>
             </View>
+
+            {/* Upgrade Modal for scan limits */}
+            <UpgradeModal
+                visible={showUpgradeModal}
+                onClose={() => {
+                    setShowUpgradeModal(false);
+                    // If it was a hard limit, go back to scan screen
+                    if (upgradeModalType === 'scanLimit') {
+                        router.back();
+                    }
+                }}
+                trigger={upgradeModalType}
+                currentCount={scanCount}
+                maxCount={FREE_TIER_SCAN_LIMIT}
+            />
         </View>
     );
 }

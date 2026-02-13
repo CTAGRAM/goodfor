@@ -23,10 +23,14 @@ import {
     EyeOff,
     ArrowRight,
     User,
-    Check
+    Check,
+    Phone,
+    Hash,
+    MessageCircle
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
-import { signUpWithEmail, verifyOtp, resendSignupOtp, signInWithGoogle } from "@/lib/supabaseAuth";
+import { signUpWithEmail, verifyOtp, resendSignupOtp, signInWithGoogle, sendOtpToPhone, verifyPhoneOtp, signUpWithPhoneAfterVerify } from "@/lib/supabaseAuth";
+import { sendVerifyOTP, checkVerifyOTP } from "@/lib/twilioWhatsApp";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { useCallback } from "react";
@@ -56,6 +60,87 @@ export default function SignUp() {
     const [loading, setLoading] = useState(false);
     const [pendingVerification, setPendingVerification] = useState(false);
     const [code, setCode] = useState("");
+
+    // Phone/WhatsApp auth state
+    const [authMethod, setAuthMethod] = useState('email'); // 'email', 'phone', or 'whatsapp'
+    const [phoneNumber, setPhoneNumber] = useState("");
+    const [phoneOtpSent, setPhoneOtpSent] = useState(false);
+    const [phoneOtpCode, setPhoneOtpCode] = useState("");
+
+    // Phone/WhatsApp OTP handlers
+    const handleSendPhoneOtp = async (isWhatsApp = false) => {
+        if (!fullName.trim()) {
+            Alert.alert("Error", "Please enter your full name first");
+            return;
+        }
+        if (!phoneNumber.trim()) {
+            Alert.alert("Error", "Please enter your phone number");
+            return;
+        }
+        if (!agreedToTerms) {
+            Alert.alert("Error", "Please agree to the Terms of Service");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            if (isWhatsApp) {
+                const result = await sendVerifyOTP(phoneNumber, 'whatsapp');
+                if (result.success) {
+                    setPhoneOtpSent(true);
+                    Alert.alert("OTP Sent", "Please check your WhatsApp for the verification code");
+                } else {
+                    Alert.alert("Error", result.error || "Failed to send WhatsApp OTP");
+                }
+            } else {
+                // Supabase native phone OTP
+                await sendOtpToPhone(phoneNumber, true); // true = signup
+                setPhoneOtpSent(true);
+                Alert.alert("OTP Sent", "Please check your phone for the verification code");
+            }
+        } catch (err) {
+            console.error('[SignUp] Phone OTP error:', err);
+            Alert.alert("Error", err.message || "Failed to send OTP");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleVerifyPhoneOtp = async (isWhatsApp = false) => {
+        if (!phoneOtpCode.trim() || phoneOtpCode.length !== 6) {
+            Alert.alert("Error", "Please enter a valid 6-digit OTP");
+            return;
+        }
+
+        setLoading(true);
+        try {
+            if (isWhatsApp) {
+                // WhatsApp verification via Twilio Verify API
+                const result = await checkVerifyOTP(phoneNumber, phoneOtpCode);
+                if (result.success) {
+                    // WhatsApp verified - create Supabase user with name
+                    console.log('[SignUp] WhatsApp verified, creating Supabase user...');
+                    await signUpWithPhoneAfterVerify(phoneNumber, { full_name: fullName });
+                    router.replace("/onboarding/subscription-offer");
+                } else {
+                    Alert.alert("Verification Failed", result.error || "Invalid OTP");
+                }
+            } else {
+                // Supabase verification
+                const data = await verifyPhoneOtp(phoneNumber, phoneOtpCode);
+                if (data.session) {
+                    router.replace("/onboarding/subscription-offer");
+                } else {
+                    Alert.alert("Error", "Verification failed. Please try again.");
+                }
+            }
+        } catch (err) {
+            console.error('[SignUp] OTP verification error:', err);
+            Alert.alert("Verification Failed", err.message || "Invalid OTP");
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSignUp = async () => {
         const trimmedEmail = email.trim();
@@ -99,7 +184,8 @@ export default function SignUp() {
                 );
             } else if (data.session) {
                 // User is logged in directly (email confirmation disabled)
-                router.replace("/(tabs)/home");
+                // Route to subscription offer first for conversion optimization
+                router.replace("/onboarding/subscription-offer");
             }
         } catch (err) {
             Alert.alert("Sign Up Failed", err.message || "An error occurred");
@@ -122,7 +208,8 @@ export default function SignUp() {
             const data = await verifyOtp(email, code, 'signup');
 
             if (data.session) {
-                router.replace("/(tabs)/home");
+                // Route to subscription offer for conversion optimization
+                router.replace("/onboarding/subscription-offer");
             } else {
                 Alert.alert("Error", "Verification incomplete. Please try again.");
             }
@@ -171,7 +258,7 @@ export default function SignUp() {
         return (
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior="padding"
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
                 keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
             >
                 <StatusBar style="dark" />
@@ -192,7 +279,7 @@ export default function SignUp() {
                     style={styles.scrollView}
                     contentContainerStyle={[
                         styles.scrollContent,
-                        { paddingBottom: insets.bottom + 300 }
+                        { paddingBottom: insets.bottom + 40 }
                     ]}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
@@ -272,7 +359,7 @@ export default function SignUp() {
                 style={styles.scrollView}
                 contentContainerStyle={[
                     styles.scrollContent,
-                    { paddingBottom: insets.bottom + 300 }
+                    { paddingBottom: insets.bottom + 40 }
                 ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
@@ -305,9 +392,34 @@ export default function SignUp() {
                     <View style={styles.dividerLine} />
                 </View>
 
+                {/* Auth Method Tabs */}
+                <View style={styles.authTabs}>
+                    <TouchableOpacity
+                        style={[styles.authTab, authMethod === 'email' && styles.authTabActive]}
+                        onPress={() => { setAuthMethod('email'); setPhoneOtpSent(false); }}
+                    >
+                        <Mail size={16} color={authMethod === 'email' ? colors.primary : colors.mutedForeground} />
+                        <Text style={[styles.authTabText, authMethod === 'email' && styles.authTabTextActive]}>Email</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.authTab, authMethod === 'phone' && styles.authTabActive]}
+                        onPress={() => { setAuthMethod('phone'); setPhoneOtpSent(false); }}
+                    >
+                        <Phone size={16} color={authMethod === 'phone' ? colors.primary : colors.mutedForeground} />
+                        <Text style={[styles.authTabText, authMethod === 'phone' && styles.authTabTextActive]}>SMS</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.authTab, authMethod === 'whatsapp' && styles.authTabActive]}
+                        onPress={() => { setAuthMethod('whatsapp'); setPhoneOtpSent(false); }}
+                    >
+                        <MessageCircle size={16} color={authMethod === 'whatsapp' ? '#25D366' : colors.mutedForeground} />
+                        <Text style={[styles.authTabText, authMethod === 'whatsapp' && styles.authTabTextActive]}>WhatsApp</Text>
+                    </TouchableOpacity>
+                </View>
+
                 {/* Form */}
                 <View style={styles.form}>
-                    {/* Full Name Field */}
+                    {/* Full Name Field - always shown */}
                     <View style={styles.inputGroup}>
                         <Text style={styles.inputLabel}>Full Name</Text>
                         <View style={styles.inputContainer}>
@@ -326,54 +438,118 @@ export default function SignUp() {
                         </View>
                     </View>
 
-                    {/* Email Field */}
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>Email Address</Text>
-                        <View style={styles.inputContainer}>
-                            <View style={styles.inputIcon}>
-                                <Mail size={20} color={colors.mutedForeground} />
+                    {authMethod === 'email' ? (
+                        <>
+                            {/* Email Field */}
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Email Address</Text>
+                                <View style={styles.inputContainer}>
+                                    <View style={styles.inputIcon}>
+                                        <Mail size={20} color={colors.mutedForeground} />
+                                    </View>
+                                    <TextInput
+                                        style={styles.textInput}
+                                        placeholder="name@example.com"
+                                        placeholderTextColor={colors.mutedForeground}
+                                        value={email}
+                                        onChangeText={setEmail}
+                                        keyboardType="email-address"
+                                        autoCapitalize="none"
+                                        autoComplete="email"
+                                    />
+                                </View>
                             </View>
-                            <TextInput
-                                style={styles.textInput}
-                                placeholder="name@example.com"
-                                placeholderTextColor={colors.mutedForeground}
-                                value={email}
-                                onChangeText={setEmail}
-                                keyboardType="email-address"
-                                autoCapitalize="none"
-                                autoComplete="email"
-                            />
-                        </View>
-                    </View>
 
-                    {/* Password Field */}
-                    <View style={styles.inputGroup}>
-                        <Text style={styles.inputLabel}>Password</Text>
-                        <View style={styles.inputContainer}>
-                            <View style={styles.inputIcon}>
-                                <Lock size={20} color={colors.mutedForeground} />
+                            {/* Password Field */}
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Password</Text>
+                                <View style={styles.inputContainer}>
+                                    <View style={styles.inputIcon}>
+                                        <Lock size={20} color={colors.mutedForeground} />
+                                    </View>
+                                    <TextInput
+                                        style={styles.textInput}
+                                        placeholder="Create a password"
+                                        placeholderTextColor={colors.mutedForeground}
+                                        value={password}
+                                        onChangeText={setPassword}
+                                        secureTextEntry={!showPassword}
+                                        autoComplete="new-password"
+                                    />
+                                    <TouchableOpacity
+                                        style={styles.eyeButton}
+                                        onPress={() => setShowPassword(!showPassword)}
+                                    >
+                                        {showPassword ? (
+                                            <EyeOff size={20} color={colors.mutedForeground} />
+                                        ) : (
+                                            <Eye size={20} color={colors.mutedForeground} />
+                                        )}
+                                    </TouchableOpacity>
+                                </View>
                             </View>
-                            <TextInput
-                                style={styles.textInput}
-                                placeholder="Create a password"
-                                placeholderTextColor={colors.mutedForeground}
-                                value={password}
-                                onChangeText={setPassword}
-                                secureTextEntry={!showPassword}
-                                autoComplete="new-password"
-                            />
-                            <TouchableOpacity
-                                style={styles.eyeButton}
-                                onPress={() => setShowPassword(!showPassword)}
-                            >
-                                {showPassword ? (
-                                    <EyeOff size={20} color={colors.mutedForeground} />
-                                ) : (
-                                    <Eye size={20} color={colors.mutedForeground} />
-                                )}
-                            </TouchableOpacity>
-                        </View>
-                    </View>
+                        </>
+                    ) : (
+                        <>
+                            {/* Phone Number Field */}
+                            {!phoneOtpSent ? (
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.inputLabel}>
+                                        {authMethod === 'whatsapp' ? 'WhatsApp Number' : 'Phone Number'}
+                                    </Text>
+                                    <View style={styles.inputContainer}>
+                                        <View style={styles.inputIcon}>
+                                            {authMethod === 'whatsapp' ? (
+                                                <MessageCircle size={20} color="#25D366" />
+                                            ) : (
+                                                <Phone size={20} color={colors.mutedForeground} />
+                                            )}
+                                        </View>
+                                        <TextInput
+                                            style={styles.textInput}
+                                            placeholder="+91 9876543210"
+                                            placeholderTextColor={colors.mutedForeground}
+                                            value={phoneNumber}
+                                            onChangeText={setPhoneNumber}
+                                            keyboardType="phone-pad"
+                                            autoComplete="tel"
+                                        />
+                                    </View>
+                                    <Text style={styles.phoneHint}>
+                                        Enter your number with country code
+                                    </Text>
+                                </View>
+                            ) : (
+                                <>
+                                    <View style={styles.otpSentBanner}>
+                                        <Text style={styles.otpSentText}>
+                                            {authMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'} OTP sent to {phoneNumber}
+                                        </Text>
+                                        <TouchableOpacity onPress={() => setPhoneOtpSent(false)}>
+                                            <Text style={styles.otpChangeText}>Change</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.inputLabel}>Verification Code</Text>
+                                        <View style={styles.inputContainer}>
+                                            <View style={styles.inputIcon}>
+                                                <Hash size={20} color={colors.mutedForeground} />
+                                            </View>
+                                            <TextInput
+                                                style={styles.textInput}
+                                                placeholder="123456"
+                                                placeholderTextColor={colors.mutedForeground}
+                                                value={phoneOtpCode}
+                                                onChangeText={setPhoneOtpCode}
+                                                keyboardType="number-pad"
+                                                maxLength={6}
+                                            />
+                                        </View>
+                                    </View>
+                                </>
+                            )}
+                        </>
+                    )}
 
                     {/* Terms Agreement */}
                     <TouchableOpacity
@@ -396,36 +572,53 @@ export default function SignUp() {
                         </Text>
                     </TouchableOpacity>
                 </View>
+
+                {/* Sign Up Button - now inside ScrollView */}
+                <View style={styles.buttonSection}>
+                    <TouchableOpacity
+                        style={[
+                            styles.signUpButton,
+                            loading && styles.signUpButtonDisabled,
+                            authMethod === 'whatsapp' && styles.whatsappButton
+                        ]}
+                        onPress={
+                            authMethod === 'email'
+                                ? handleSignUp
+                                : authMethod === 'phone'
+                                    ? (phoneOtpSent ? () => handleVerifyPhoneOtp(false) : () => handleSendPhoneOtp(false))
+                                    : (phoneOtpSent ? () => handleVerifyPhoneOtp(true) : () => handleSendPhoneOtp(true))
+                        }
+                        disabled={loading}
+                    >
+                        {loading ? (
+                            <ActivityIndicator size="small" color={colors.primaryForeground} />
+                        ) : (
+                            <>
+                                <Text style={styles.signUpButtonText}>
+                                    {authMethod === 'email'
+                                        ? 'Sign Up'
+                                        : authMethod === 'phone'
+                                            ? (phoneOtpSent ? 'Verify OTP' : 'Send OTP')
+                                            : (phoneOtpSent ? 'Verify WhatsApp' : 'Send WhatsApp OTP')
+                                    }
+                                </Text>
+                                <View style={styles.signUpButtonIcon}>
+                                    <ArrowRight size={20} color={colors.primaryForeground} />
+                                </View>
+                            </>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.switchAuthButton}
+                        onPress={() => router.push("/sign-in")}
+                    >
+                        <Text style={styles.switchAuthText}>
+                            Already have an account? <Text style={styles.switchAuthLink}>Sign In</Text>
+                        </Text>
+                    </TouchableOpacity>
+                </View>
             </ScrollView>
-
-            {/* Footer */}
-            <View style={[styles.footer, { paddingBottom: insets.bottom + 40 }]}>
-                <TouchableOpacity
-                    style={[styles.signUpButton, loading && styles.signUpButtonDisabled]}
-                    onPress={handleSignUp}
-                    disabled={loading}
-                >
-                    {loading ? (
-                        <ActivityIndicator size="small" color={colors.primaryForeground} />
-                    ) : (
-                        <>
-                            <Text style={styles.signUpButtonText}>Sign Up</Text>
-                            <View style={styles.signUpButtonIcon}>
-                                <ArrowRight size={20} color={colors.primaryForeground} />
-                            </View>
-                        </>
-                    )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    style={styles.switchAuthButton}
-                    onPress={() => router.push("/sign-in")}
-                >
-                    <Text style={styles.switchAuthText}>
-                        Already have an account? <Text style={styles.switchAuthLink}>Sign In</Text>
-                    </Text>
-                </TouchableOpacity>
-            </View>
         </KeyboardAvoidingView>
     );
 }
@@ -627,13 +820,15 @@ const styles = StyleSheet.create({
         color: colors.primary,
     },
 
-    // Footer
+    // Button section (inside scroll)
+    buttonSection: {
+        paddingHorizontal: 0,
+        paddingTop: 24,
+        paddingBottom: 40,
+    },
+    // Footer (kept for reference but not used)
     footer: {
-        position: "absolute",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        paddingHorizontal: 32,
+        paddingHorizontal: 24,
         paddingTop: 32,
         backgroundColor: colors.background,
         zIndex: 20,
@@ -682,5 +877,68 @@ const styles = StyleSheet.create({
     },
     switchAuthLink: {
         color: colors.primary,
+    },
+    // Phone/WhatsApp Auth Styles
+    authTabs: {
+        flexDirection: "row",
+        backgroundColor: colors.input,
+        borderRadius: 16,
+        padding: 4,
+        marginBottom: 24,
+    },
+    authTab: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingVertical: 12,
+        borderRadius: 12,
+    },
+    authTabActive: {
+        backgroundColor: colors.card,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 2,
+        elevation: 1,
+    },
+    authTabText: {
+        fontSize: 13,
+        fontFamily: fonts.sans.medium,
+        color: colors.mutedForeground,
+    },
+    authTabTextActive: {
+        color: colors.foreground,
+        fontFamily: fonts.sans.bold,
+    },
+    phoneHint: {
+        fontSize: 12,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        marginTop: 8,
+        marginLeft: 16,
+    },
+    otpSentBanner: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        backgroundColor: `${colors.chart1}15`,
+        borderRadius: 12,
+        padding: 12,
+        marginBottom: 16,
+    },
+    otpSentText: {
+        fontSize: 13,
+        fontFamily: fonts.sans.medium,
+        color: colors.foreground,
+    },
+    otpChangeText: {
+        fontSize: 13,
+        fontFamily: fonts.sans.bold,
+        color: colors.primary,
+    },
+    whatsappButton: {
+        backgroundColor: '#25D366',
     },
 });

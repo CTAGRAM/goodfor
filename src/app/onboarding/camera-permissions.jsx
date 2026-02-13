@@ -3,11 +3,13 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Camera as CameraIcon, ArrowLeft } from 'lucide-react-native';
 import { Camera } from 'expo-camera';
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, fonts, fontSizes, spacing, radius, shadows } from '@/constants/theme';
 import { Button } from '@/components/ui';
 
 export default function CameraPermissions() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
 
     const handleAllowCamera = async () => {
         try {
@@ -40,7 +42,7 @@ export default function CameraPermissions() {
             <View style={styles.blurBottom} />
 
             {/* Header */}
-            <View style={styles.header}>
+            <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
                 <Pressable style={styles.backButton} onPress={() => router.back()}>
                     <ArrowLeft size={24} color={colors.foreground} />
                 </Pressable>
@@ -85,11 +87,12 @@ export default function CameraPermissions() {
             </View>
 
             {/* Footer */}
-            <View style={styles.footer}>
+            <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
                 <Button
                     variant="primary"
                     size="lg"
                     onPress={handleAllowCamera}
+                    style={{ marginBottom: 16 }}
                 >
                     Allow camera access
                 </Button>
@@ -132,7 +135,6 @@ const styles = StyleSheet.create({
     },
     header: {
         paddingHorizontal: spacing[6],
-        paddingTop: spacing[14],
         paddingBottom: spacing[4],
         zIndex: 10,
     },
@@ -151,47 +153,47 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     iconContainer: {
-        marginBottom: spacing[12],
+        marginBottom: spacing[8],
     },
     iconOuter: {
-        width: 200,
-        height: 200,
+        width: 180,
+        height: 180,
         backgroundColor: `${colors.accent}4D`,
-        borderRadius: 100,
+        borderRadius: 90,
         alignItems: 'center',
         justifyContent: 'center',
     },
     iconInner: {
-        width: 160,
-        height: 160,
+        width: 140,
+        height: 140,
         backgroundColor: `${colors.accent}66`,
-        borderRadius: 80,
+        borderRadius: 70,
         alignItems: 'center',
         justifyContent: 'center',
     },
     textContent: {
-        gap: spacing[6],
+        gap: spacing[4],
         alignItems: 'center',
-        marginBottom: spacing[10],
+        marginBottom: spacing[8],
     },
     title: {
-        fontSize: fontSizes['5xl'],
+        fontSize: fontSizes['4xl'],
         fontFamily: fonts.sansExtraBold,
         color: colors.foreground,
-        lineHeight: fontSizes['5xl'] * 1.1,
+        lineHeight: 48,
         letterSpacing: -0.5,
         textAlign: 'center',
     },
     description: {
-        fontSize: fontSizes.xl - 1,
+        fontSize: fontSizes.lg,
         fontFamily: fonts.sans,
         color: colors.mutedForeground,
-        lineHeight: fontSizes.xl * 1.5,
+        lineHeight: 24,
         textAlign: 'center',
-        maxWidth: '85%',
+        maxWidth: '90%',
     },
     privacyPoints: {
-        gap: spacing[4],
+        gap: spacing[3],
         alignSelf: 'stretch',
     },
     privacyPoint: {
@@ -206,15 +208,14 @@ const styles = StyleSheet.create({
         backgroundColor: colors.chart1,
     },
     privacyText: {
-        fontSize: fontSizes.base,
+        fontSize: fontSizes.md,
         fontFamily: fonts.sansMedium,
         color: colors.foreground,
     },
     footer: {
         paddingHorizontal: spacing[8],
-        paddingBottom: spacing[10],
-        paddingTop: spacing[8],
-        gap: spacing[4],
+        paddingTop: spacing[4],
+        backgroundColor: colors.background, // Ensure background covers any content below
     },
     skipButton: {
         paddingHorizontal: spacing[6],

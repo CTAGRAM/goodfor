@@ -34,19 +34,21 @@ export default function RootLayout() {
     return null;
   }
 
+  // AuthProvider is outside so RevenueCatProvider can access auth state
   return (
-    <RevenueCatProvider>
-      <AuthProvider>
+    <AuthProvider>
+      <RevenueCatProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <Stack screenOptions={{ headerShown: false }} initialRouteName="index">
             <Stack.Screen name="index" />
             <Stack.Screen name="splash" />
             <Stack.Screen name="sign-in" />
             <Stack.Screen name="sign-up" />
+            <Stack.Screen name="auth/callback" />
             <Stack.Screen name="(tabs)" />
           </Stack>
         </GestureHandlerRootView>
-      </AuthProvider>
-    </RevenueCatProvider>
+      </RevenueCatProvider>
+    </AuthProvider>
   );
 }

@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, Pressable } from "react-native";
+import { useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Pressable, Modal } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -14,7 +15,20 @@ import {
     CheckCircle,
     XCircle,
     ChevronDown,
-    FileText as Notes
+    FileText as Notes,
+    X,
+    Database,
+    Scale,
+    Users,
+    Sparkles,
+    Heart,
+    HelpCircle,
+    Flower2,
+    Droplets,
+    Baby,
+    Salad,
+    Candy,
+    Factory
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { SAFETY_LEVELS } from "@/lib/productSafety";
@@ -25,23 +39,239 @@ export default function SafetyDetails() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { profile } = useAuth();
+    const [showMethodologyModal, setShowMethodologyModal] = useState(false);
 
-    const product = JSON.parse(productData);
-    const safety = product.safetyAnalysis;
+    // Defensive parsing to prevent crashes
+    let product = {};
+    try {
+        product = JSON.parse(productData || '{}');
+    } catch (e) {
+        console.error('Failed to parse productData:', e);
+    }
 
-    // Calculate detailed scores
-    const overallScore = (safety.safeScore / 10).toFixed(1);
-    const scores = [
-        { icon: Leaf, label: 'Ingredients Safety', description: 'All ingredients age-appropriate', score: 2.5, max: 2.5, color: colors.chart1 },
-        { icon: AlertTriangle, label: 'Allergen Profile', description: product.allergens.length > 0 ? `${product.allergens.length} allergen(s) detected` : 'No major allergens detected', score: product.allergens.length > 0 ? 1.0 : 2.0, max: 2.0, color: product.allergens.length > 0 ? colors.chart2 : colors.chart1 },
-        { icon: FlaskConical, label: 'Nutritional Value', description: `${product.nutriments.sugars > 10 ? 'High' : 'Moderate'} sugar content`, score: product.nutriments.sugars > 10 ? 1.0 : 1.5, max: 2.0, color: product.nutriments.sugars > 10 ? colors.chart2 : colors.chart1 },
-        { icon: FileText, label: 'Clinical Evidence', description: 'Based on food database', score: 1.5, max: 2.0, color: colors.chart1 },
-        { icon: ShieldAlert, label: 'Age Suitability', description: safety.ageAppropriate ? 'Suitable for selected age' : 'Not age-appropriate', score: safety.ageAppropriate ? 1.5 : 0.5, max: 1.5, color: safety.ageAppropriate ? colors.chart1 : colors.chart3 },
-    ];
+    const safety = product.safetyAnalysis || {
+        safety: 'SAFE',
+        safeScore: 50,
+        issues: [],
+        ageAppropriate: true,
+        nutriScore: null,
+    };
+
+    // Detect if this is a beauty product
+    const isBeautyProduct = product.productType === 'BEAUTY' || safety.productType === 'BEAUTY';
+
+    const nutriments = product.nutriments || {};
+    const breakdown = safety.nutriScore?.breakdown || {};
+    const positives = breakdown.positives || {};
+    const negatives = breakdown.negatives || {};
+
+    // Get the actual overall score from productSafety.js calculation
+    const overallScore = Math.round(safety.safeScore || 50);
+
+    // ============ BEAUTY PRODUCT SCORING (Enhanced v2.0) ============
+    if (isBeautyProduct) {
+        // Use new 5-pillar system from enhanced algorithm
+        const pillars = safety.pillars || {
+            toxicity: 25,
+            sensitization: 25,
+            endocrine: 25,
+            environment: 15,
+            dataQuality: 10,
+        };
+
+        const allIssues = safety.issues || [];
+        const fragranceIssues = allIssues.filter(i => i.type === 'FRAGRANCE_ALLERGEN' || i.type === 'FRAGRANCE');
+        const ageIssues = allIssues.filter(i => i.type === 'AGE_RESTRICTION');
+        const pregnancyIssues = allIssues.filter(i => i.type === 'PREGNANCY_RESTRICTION');
+        const endocrineIssues = allIssues.filter(i => i.type === 'SUNSCREEN_FILTER' || i.name?.includes('OXYBENZONE') || i.name?.includes('PARABEN'));
+        const toxicityIssues = allIssues.filter(i => ['AGE_RESTRICTION', 'PREGNANCY_RESTRICTION', 'INGREDIENT_CONCERN'].includes(i.type));
+        const envIssues = allIssues.filter(i => i.reason?.includes('reef') || i.reason?.includes('environment'));
+
+        // Build scores based on pillar data
+        const scores = [
+            {
+                icon: Leaf,
+                label: 'Toxicity & Irritation',
+                description: toxicityIssues.length > 0
+                    ? `${toxicityIssues.length} concern(s) found`
+                    : 'No toxicity concerns',
+                score: Math.round(pillars.toxicity),
+                max: 25,
+                color: pillars.toxicity >= 20 ? colors.chart1 : pillars.toxicity >= 10 ? colors.chart2 : colors.chart3
+            },
+            {
+                icon: AlertTriangle,
+                label: 'Sensitization Risk',
+                description: (safety.fragranceAllergenCount || 0) > 0
+                    ? `${safety.fragranceAllergenCount} allergen(s) detected`
+                    : 'Low sensitization risk',
+                score: Math.round(pillars.sensitization),
+                max: 25,
+                color: pillars.sensitization >= 20 ? colors.chart1 : pillars.sensitization >= 10 ? colors.chart2 : colors.chart3
+            },
+
+            {
+                icon: ShieldAlert,
+                label: 'Endocrine Safety',
+                description: endocrineIssues.length > 0
+                    ? `${endocrineIssues.length} endocrine concern(s)`
+                    : 'No hormone disruption risk',
+                score: Math.round(pillars.endocrine),
+                max: 25,
+                color: pillars.endocrine >= 20 ? colors.chart1 : pillars.endocrine >= 10 ? colors.chart2 : colors.chart3
+            },
+            {
+                icon: Heart,
+                label: 'Environmental Impact',
+                description: envIssues.length > 0
+                    ? `${envIssues.length} environmental concern(s)`
+                    : 'Eco-friendly formulation',
+                score: Math.round(pillars.environment),
+                max: 15,
+                color: pillars.environment >= 12 ? colors.chart1 : pillars.environment >= 5 ? colors.chart2 : colors.chart3
+            },
+            {
+                icon: FileText,
+                label: 'Data Quality',
+                description: pillars.dataQuality >= 8 ? 'Complete INCI list' : 'Limited ingredient data',
+                score: Math.round(pillars.dataQuality),
+                max: 10,
+                color: pillars.dataQuality >= 8 ? colors.chart1 : colors.chart2,
+                tooltip: 'This score reflects the availability of ingredient data and clinical studies — not evidence of harm. Most cosmetic products fall in this range.',
+            },
+        ];
+
+        var finalScores = scores;
+    } else {
+        // ============ FOOD PRODUCT SCORING ============
+        // Calculate RAW category scores (these represent relative importance/impact)
+
+        // 1. Ingredients Safety: Based on ingredient-related issues
+        const ingredientIssues = (safety.issues || []).filter(i => i.type === 'ingredient' || i.type === 'additive');
+        const rawIngredientScore = Math.max(0, 100 - (ingredientIssues.length * 30));
+        const ingredientDescription = ingredientIssues.length > 0
+            ? `${ingredientIssues.length} concern(s) found`
+            : 'All ingredients age-appropriate';
+
+        // 2. Allergen Profile: Based on allergens
+        const allergenCount = (product.allergens || []).length;
+        const personalAllergenMatch = safety.hasPersonalAllergenMatch || false;
+        let rawAllergenScore = Math.max(0, 100 - (allergenCount * 15));
+        if (personalAllergenMatch) rawAllergenScore = 0;
+        const allergenDescription = personalAllergenMatch
+            ? `Contains your allergens!`
+            : allergenCount > 0
+                ? `${allergenCount} allergen(s) detected`
+                : 'No major allergens detected';
+
+        // 3. Nutritional Value: Based on Nutri-Score
+        const sugarPts = negatives.sugars?.points || 0;
+        const satFatPts = negatives.saturates?.points || 0;
+        const sodiumPts = negatives.sodium?.points || 0;
+        const energyPts = negatives.energy?.points || 0;
+        const fiberPts = positives.fiber?.points || 0;
+        const proteinPts = positives.protein?.points || 0;
+        const negativeTotal = sugarPts + satFatPts + sodiumPts + energyPts;
+        const positiveTotal = fiberPts + proteinPts;
+        const rawNutritionScore = Math.max(0, Math.min(100, 100 - (negativeTotal * 2) + (positiveTotal * 3)));
+        const sugarValue = negatives.sugars?.value || nutriments.sugars || 0;
+        const nutritionDescription = sugarValue > 12.5 ? 'High sugar content' :
+            sugarValue > 4.5 ? 'Moderate sugar content' : 'Low sugar content';
+
+        // 4. Clinical Evidence: Based on data completeness
+        const hasNutriScore = !!safety.nutriScore?.grade;
+        const hasIngredients = (product.ingredientsText?.length || 0) > 10;
+        const hasNutriments = (nutriments.energy_kcal || 0) > 0;
+        const dataCompleteness = [hasNutriScore, hasIngredients, hasNutriments].filter(Boolean).length;
+        const rawEvidenceScore = Math.round(33 + (dataCompleteness * 22));
+        const evidenceDescription = dataCompleteness === 3 ? 'Complete food database' :
+            dataCompleteness >= 2 ? 'Based on food database' : 'Limited data available';
+
+        // 5. Age Suitability: Based on age-specific analysis
+        const rawAgeScore = safety.ageAppropriate ? 100 : 30;
+        const ageDescription = safety.ageAppropriate
+            ? `Suitable for ${safety.ageGroup || 'selected age'}`
+            : 'Not age-appropriate';
+
+        // Category weights (must sum to 1.0) - determines how score is distributed
+        const weights = {
+            ingredients: 0.25,   // 25% of total score
+            allergens: 0.20,     // 20% of total score
+            nutrition: 0.25,     // 25% of total score
+            evidence: 0.15,      // 15% of total score
+            age: 0.15            // 15% of total score
+        };
+
+        // Calculate weighted scores that sum exactly to overallScore
+        const rawTotal = rawIngredientScore * weights.ingredients +
+            rawAllergenScore * weights.allergens +
+            rawNutritionScore * weights.nutrition +
+            rawEvidenceScore * weights.evidence +
+            rawAgeScore * weights.age;
+
+        const scaleFactor = rawTotal > 0 ? overallScore / rawTotal : 1;
+
+        // Final category scores that SUM to overallScore
+        const finalIngredientScore = Math.round(rawIngredientScore * weights.ingredients * scaleFactor);
+        const finalAllergenScore = Math.round(rawAllergenScore * weights.allergens * scaleFactor);
+        const finalNutritionScore = Math.round(rawNutritionScore * weights.nutrition * scaleFactor);
+        const finalEvidenceScore = Math.round(rawEvidenceScore * weights.evidence * scaleFactor);
+        const finalAgeScore = Math.round(rawAgeScore * weights.age * scaleFactor);
+
+        // Adjust for rounding errors
+        const currentSum = finalIngredientScore + finalAllergenScore + finalNutritionScore + finalEvidenceScore + finalAgeScore;
+        const adjustment = overallScore - currentSum;
+
+        var finalScores = [
+            {
+                icon: Leaf,
+                label: 'Ingredients Safety',
+                description: ingredientDescription,
+                score: finalIngredientScore + (adjustment > 0 ? adjustment : 0),
+                max: 25,
+                color: rawIngredientScore >= 70 ? colors.chart1 : rawIngredientScore >= 40 ? colors.chart2 : colors.chart3
+            },
+            {
+                icon: AlertTriangle,
+                label: 'Allergen Profile',
+                description: allergenDescription,
+                score: finalAllergenScore,
+                max: 20,
+                color: rawAllergenScore >= 70 ? colors.chart1 : rawAllergenScore >= 40 ? colors.chart2 : colors.chart3
+            },
+            {
+                icon: FlaskConical,
+                label: 'Nutritional Value',
+                description: nutritionDescription,
+                score: finalNutritionScore,
+                max: 25,
+                color: rawNutritionScore >= 70 ? colors.chart1 : rawNutritionScore >= 40 ? colors.chart2 : colors.chart3
+            },
+            {
+                icon: FileText,
+                label: 'Clinical Evidence',
+                description: evidenceDescription,
+                score: finalEvidenceScore,
+                max: 15,
+                color: dataCompleteness >= 2 ? colors.chart1 : colors.chart2
+            },
+            {
+                icon: ShieldAlert,
+                label: 'Age Suitability',
+                description: ageDescription,
+                score: finalAgeScore,
+                max: 15,
+                color: safety.ageAppropriate ? colors.chart1 : colors.chart3
+            },
+        ];
+    }
+
+    // Use finalScores for rendering (defined in either branch above)
+    const scores = finalScores;
 
     // Family analysis based on profile
     const familyMembers = [
-        { name: profile?.full_name || 'User', age: profile?.age_years || 30, type: 'Adult', status: safety.safety, statusLabel: getSafetyLabel(safety.safety), tip: safety.issues[0]?.reason || 'No concerns' },
+        { name: profile?.full_name || 'User', age: profile?.age_years || 30, type: 'Adult', status: safety.safety, statusLabel: getSafetyLabel(safety.safety), tip: (safety.issues || [])[0]?.reason || 'No concerns' },
     ];
 
     function getSafetyLabel(level) {
@@ -77,7 +307,7 @@ export default function SafetyDetails() {
                     <ArrowLeft size={24} color={colors.foreground} />
                 </Pressable>
                 <Text style={styles.headerTitle}>Safety by age</Text>
-                <Pressable style={styles.headerButton} onPress={() => { }}>
+                <Pressable style={styles.headerButton} onPress={() => setShowMethodologyModal(true)}>
                     <Info size={20} color={colors.foreground} />
                 </Pressable>
             </View>
@@ -98,13 +328,13 @@ export default function SafetyDetails() {
                         </View>
                         <View style={styles.scoreValue}>
                             <Text style={styles.scoreNumber}>{overallScore}</Text>
-                            <Text style={styles.scoreMax}>/10</Text>
+                            <Text style={styles.scoreMax}>/100</Text>
                         </View>
                     </View>
 
                     {/* Progress bar */}
                     <View style={styles.progressBar}>
-                        <View style={[styles.progressFill, { width: `${safety.safeScore}%` }]} />
+                        <View style={[styles.progressFill, { width: `${overallScore}%` }]} />
                     </View>
 
                     <Text style={styles.scoreDescription}>
@@ -122,13 +352,19 @@ export default function SafetyDetails() {
                                             <Icon size={16} color={item.color} />
                                         </View>
                                         <View style={styles.scoreRowInfo}>
-                                            <Text style={styles.scoreRowLabel}>{item.label}</Text>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                <Text style={styles.scoreRowLabel}>{item.label}</Text>
+                                                {item.tooltip && <Info size={12} color={colors.mutedForeground} />}
+                                            </View>
                                             <Text style={styles.scoreRowDesc}>{item.description}</Text>
+                                            {item.tooltip && (
+                                                <Text style={styles.tooltipText}>{item.tooltip}</Text>
+                                            )}
                                         </View>
                                     </View>
                                     <View style={styles.scoreRowValue}>
-                                        <Text style={[styles.scoreRowNumber, { color: item.color }]}>{item.score.toFixed(1)}</Text>
-                                        <Text style={styles.scoreRowMax}>/{item.max.toFixed(1)}</Text>
+                                        <Text style={[styles.scoreRowNumber, { color: item.color }]}>{item.score}</Text>
+                                        <Text style={styles.scoreRowMax}>/{item.max}</Text>
                                     </View>
                                 </View>
                             );
@@ -137,14 +373,16 @@ export default function SafetyDetails() {
 
                     {/* Dietary checks */}
                     <View style={styles.dietaryChecks}>
-                        <View style={styles.checkItem}>
-                            <CheckCircle size={16} color={colors.chart1} />
-                            <Text style={styles.checkText}>No pork ingredients detected</Text>
-                        </View>
-                        {product.allergens.length > 0 && (
+                        {(profile?.dietary_preferences?.includes('No Pork') || profile?.dietary_preferences?.includes('Halal')) && (
+                            <View style={styles.checkItem}>
+                                <CheckCircle size={16} color={colors.chart1} />
+                                <Text style={styles.checkText}>No pork ingredients detected</Text>
+                            </View>
+                        )}
+                        {(product.allergens?.length || 0) > 0 && (
                             <View style={styles.checkItem}>
                                 <XCircle size={16} color={colors.chart3} />
-                                <Text style={styles.checkText}>Contains allergens: {product.allergens.map(a => a.replace('en:', '')).join(', ')}</Text>
+                                <Text style={styles.checkText}>Contains allergens: {(product.allergens || []).map(a => a.replace('en:', '')).join(', ')}</Text>
                             </View>
                         )}
                         {product.traces && product.traces.length > 0 && (
@@ -163,7 +401,165 @@ export default function SafetyDetails() {
                         </View>
                         <ChevronDown size={16} color={colors.mutedForeground} />
                     </Pressable>
+
+                    {/* Why Not 100%? - Phase 2 */}
+                    {overallScore < 100 && (safety.issues?.length > 0 || safety.personalConcerns?.length > 0) && (
+                        <View style={styles.whyNotSection}>
+                            <View style={styles.whyNotTitleContainer}>
+                                <HelpCircle size={16} color={colors.chart2} />
+                                <Text style={styles.whyNotTitle}> Why not 100%?</Text>
+                            </View>
+                            <View style={styles.whyNotList}>
+                                {(safety.issues || []).slice(0, 3).map((issue, idx) => (
+                                    <View key={idx} style={styles.whyNotItem}>
+                                        <Text style={styles.whyNotBullet}>•</Text>
+                                        <Text style={styles.whyNotText}>
+                                            {issue.name || issue.reason || 'Ingredient concern detected'}
+                                        </Text>
+                                    </View>
+                                ))}
+                                {(safety.issues?.length || 0) > 3 && (
+                                    <Text style={styles.whyNotMore}>
+                                        +{safety.issues.length - 3} more factors
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Who Should Be Cautious - Phase 2 */}
+                    <View style={styles.cautionSection}>
+                        <View style={styles.cautionTitleContainer}>
+                            <AlertTriangle size={16} color={colors.chart2} />
+                            <Text style={styles.cautionTitle}> Who should be cautious</Text>
+                        </View>
+                        <View style={styles.cautionList}>
+                            {isBeautyProduct ? (
+                                <>
+                                    {(safety.fragranceAllergenCount > 0) && (
+                                        <View style={styles.cautionItem}>
+                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart2}20` }]}>
+                                                <Flower2 size={14} color={colors.chart2} />
+                                            </View>
+                                            <Text style={styles.cautionText}>People with fragrance allergies</Text>
+                                        </View>
+                                    )}
+                                    {(safety.issues?.some(i => i.type === 'SENSITIZATION' || i.reason?.includes('sensitive'))) && (
+                                        <View style={styles.cautionItem}>
+                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart2}20` }]}>
+                                                <Droplets size={14} color={colors.chart2} />
+                                            </View>
+                                            <Text style={styles.cautionText}>Very sensitive or eczema-prone skin</Text>
+                                        </View>
+                                    )}
+                                    <View style={styles.cautionItem}>
+                                        <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart3}20` }]}>
+                                            <Baby size={14} color={colors.chart3} />
+                                        </View>
+                                        <Text style={styles.cautionText}>Infants and toddlers (under 3 years)</Text>
+                                    </View>
+                                </>
+                            ) : (
+                                <>
+                                    {(nutriments.sodium_100g > 400) && (
+                                        <View style={styles.cautionItem}>
+                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart2}20` }]}>
+                                                <Salad size={14} color={colors.chart2} />
+                                            </View>
+                                            <Text style={styles.cautionText}>People with high blood pressure (high sodium)</Text>
+                                        </View>
+                                    )}
+                                    {(nutriments.sugars_100g > 12.5) && (
+                                        <View style={styles.cautionItem}>
+                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart2}20` }]}>
+                                                <Candy size={14} color={colors.chart2} />
+                                            </View>
+                                            <Text style={styles.cautionText}>People managing blood sugar or on low-sugar diets</Text>
+                                        </View>
+                                    )}
+                                    {(safety.novaGroup?.group === 4) && (
+                                        <View style={styles.cautionItem}>
+                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart3}20` }]}>
+                                                <Factory size={14} color={colors.chart3} />
+                                            </View>
+                                            <Text style={styles.cautionText}>Those limiting ultra-processed foods</Text>
+                                        </View>
+                                    )}
+                                </>
+                            )}
+                        </View>
+                    </View>
                 </View>
+
+
+                {/* Personal Concerns Section (Phase 3) */}
+                {isBeautyProduct && safety.personalConcerns && safety.personalConcerns.length > 0 && (
+                    <View style={styles.personalConcernsCard}>
+                        <View style={styles.personalConcernsHeader}>
+                            <View style={styles.personalConcernsIconBg}>
+                                <ShieldAlert size={20} color={colors.destructive} />
+                            </View>
+                            <View style={styles.personalConcernsHeaderText}>
+                                <Text style={styles.personalConcernsTitle}>Personal Concerns</Text>
+                                <Text style={styles.personalConcernsSubtitle}>
+                                    Based on your profile settings
+                                </Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.personalConcernsList}>
+                            {safety.personalConcerns.map((concern, index) => {
+                                const isAllergen = concern.type === 'PERSONAL_ALLERGEN';
+                                const isCritical = concern.severity === 'CRITICAL';
+                                return (
+                                    <View
+                                        key={index}
+                                        style={[
+                                            styles.personalConcernItem,
+                                            isCritical && styles.personalConcernItemCritical
+                                        ]}
+                                    >
+                                        <View style={styles.personalConcernLeft}>
+                                            {isCritical ? (
+                                                <XCircle size={18} color={colors.destructive} />
+                                            ) : (
+                                                <AlertTriangle size={18} color={colors.chart2} />
+                                            )}
+                                            <View style={styles.personalConcernText}>
+                                                <Text style={styles.personalConcernName}>{concern.name}</Text>
+                                                <Text style={styles.personalConcernReason}>{concern.reason}</Text>
+                                            </View>
+                                        </View>
+                                        <View
+                                            style={[
+                                                styles.personalConcernBadge,
+                                                isCritical
+                                                    ? styles.personalConcernBadgeCritical
+                                                    : styles.personalConcernBadgeCaution
+                                            ]}
+                                        >
+                                            <Text
+                                                style={[
+                                                    styles.personalConcernBadgeText,
+                                                    isCritical && styles.personalConcernBadgeTextCritical
+                                                ]}
+                                            >
+                                                {concern.severity}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                );
+                            })}
+                        </View>
+
+                        <View style={styles.personalConcernsFooter}>
+                            <Info size={14} color={colors.mutedForeground} />
+                            <Text style={styles.personalConcernsFooterText}>
+                                Update your profile to customize these warnings
+                            </Text>
+                        </View>
+                    </View>
+                )}
 
                 {/* Profile Analysis */}
                 <View style={styles.section}>
@@ -207,13 +603,258 @@ export default function SafetyDetails() {
                     <View style={styles.summaryContent}>
                         <Text style={styles.summaryLabel}>Safety Summary</Text>
                         <Text style={styles.summaryText}>
-                            {safety.issues.length === 0
-                                ? 'This product appears safe for consumption based on the selected profiles.'
-                                : `Key concerns: ${safety.issues.slice(0, 2).map(i => i.name).join(', ')}. Always verify with healthcare provider if unsure.`}
+                            {(safety.issues?.length || 0) === 0
+                                ? 'This product appears safe based on the selected profiles.'
+                                : `Key concerns: ${(safety.issues || []).slice(0, 2).map(i => i.name).join(', ')}. Always verify with healthcare provider if unsure.`}
                         </Text>
                     </View>
                 </View>
             </ScrollView>
+
+            {/* Scoring Methodology Modal */}
+            <Modal
+                visible={showMethodologyModal}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setShowMethodologyModal(false)}
+            >
+                <View style={[styles.modalContainer, { paddingTop: insets.top }]}>
+                    {/* Modal Header */}
+                    <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>How We Calculate Scores</Text>
+                        <Pressable
+                            style={styles.modalCloseBtn}
+                            onPress={() => setShowMethodologyModal(false)}
+                        >
+                            <X size={24} color={colors.foreground} />
+                        </Pressable>
+                    </View>
+
+                    <ScrollView
+                        style={styles.modalScroll}
+                        contentContainerStyle={styles.modalContent}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {/* Introduction */}
+                        <View style={styles.methodSection}>
+                            <View style={styles.methodHeader}>
+                                <View style={[styles.methodIcon, { backgroundColor: `${colors.primary}15` }]}>
+                                    <Sparkles size={20} color={colors.primary} />
+                                </View>
+                                <Text style={styles.methodTitle}>Our Scoring Philosophy</Text>
+                            </View>
+                            <Text style={styles.methodText}>
+                                Our safety score combines scientific nutritional analysis with age-specific safety guidelines.
+                                We analyze each product across multiple dimensions to give you a comprehensive safety picture.
+                            </Text>
+                        </View>
+
+                        {/* Score Categories */}
+                        <View style={styles.methodSection}>
+                            <View style={styles.methodHeader}>
+                                <View style={[styles.methodIcon, { backgroundColor: `${colors.chart1}15` }]}>
+                                    <Scale size={20} color={colors.chart1} />
+                                </View>
+                                <Text style={styles.methodTitle}>Score Categories</Text>
+                            </View>
+
+                            <View style={styles.categoryItem}>
+                                <View style={styles.categoryBadge}>
+                                    <Leaf size={14} color={colors.chart1} />
+                                </View>
+                                <View style={styles.categoryInfo}>
+                                    <Text style={styles.categoryName}>Ingredients Safety (25%)</Text>
+                                    <Text style={styles.categoryDesc}>
+                                        Analyzes ingredients against age-specific restrictions (e.g., honey for infants,
+                                        caffeine for children) and identifies concerning additives like artificial colors.
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.categoryItem}>
+                                <View style={styles.categoryBadge}>
+                                    <AlertTriangle size={14} color={colors.chart2} />
+                                </View>
+                                <View style={styles.categoryInfo}>
+                                    <Text style={styles.categoryName}>Allergen Profile (20%)</Text>
+                                    <Text style={styles.categoryDesc}>
+                                        Cross-references product allergens with your declared allergies.
+                                        Personal allergen matches significantly reduce the score.
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.categoryItem}>
+                                <View style={styles.categoryBadge}>
+                                    <FlaskConical size={14} color={colors.chart1} />
+                                </View>
+                                <View style={styles.categoryInfo}>
+                                    <Text style={styles.categoryName}>Nutritional Value (25%)</Text>
+                                    <Text style={styles.categoryDesc}>
+                                        Based on European Nutri-Score algorithm. Factors in sugars, saturated fats,
+                                        sodium, calories (negative) and fiber, protein (positive).
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.categoryItem}>
+                                <View style={styles.categoryBadge}>
+                                    <FileText size={14} color={colors.primary} />
+                                </View>
+                                <View style={styles.categoryInfo}>
+                                    <Text style={styles.categoryName}>Clinical Evidence (15%)</Text>
+                                    <Text style={styles.categoryDesc}>
+                                        Measures data completeness - products with verified Nutri-Score,
+                                        complete ingredient lists, and nutrition data score higher.
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.categoryItem}>
+                                <View style={styles.categoryBadge}>
+                                    <Users size={14} color={colors.chart1} />
+                                </View>
+                                <View style={styles.categoryInfo}>
+                                    <Text style={styles.categoryName}>Age Suitability (15%)</Text>
+                                    <Text style={styles.categoryDesc}>
+                                        Evaluates if the product is appropriate for the selected age group
+                                        based on sodium, sugar, and specific ingredient restrictions.
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Data Sources */}
+                        <View style={styles.methodSection}>
+                            <View style={styles.methodHeader}>
+                                <View style={[styles.methodIcon, { backgroundColor: `${colors.accent}` }]}>
+                                    <Database size={20} color={colors.primary} />
+                                </View>
+                                <Text style={styles.methodTitle}>Data Sources</Text>
+                            </View>
+
+                            {isBeautyProduct ? (
+                                <>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>Open Beauty Facts</Text> - Open cosmetics database with 200k+ products
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>EU Cosmetics Regulation 1223/2009</Text> - Official EU safety standards
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>CIR Safety Assessments</Text> - Cosmetic Ingredient Review data
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>EU 26 Fragrance Allergens</Text> - Mandatory disclosure allergens
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>Pediatric Dermatology Guidelines</Text> - AAP, FDA infant safety
+                                        </Text>
+                                    </View>
+                                </>
+                            ) : (
+                                <>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>Open Food Facts</Text> - World's largest open food database with 3M+ products
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>Nutri-Score Algorithm</Text> - Official European nutritional scoring system
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>NOVA Classification</Text> - Food processing level assessment (1-4)
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>Eco-Score</Text> - Environmental impact rating (A-E)
+                                        </Text>
+                                    </View>
+                                    <View style={styles.sourceItem}>
+                                        <CheckCircle size={16} color={colors.chart1} />
+                                        <Text style={styles.sourceText}>
+                                            <Text style={styles.sourceBold}>Medical Guidelines</Text> - WHO, AAP pediatric nutrition standards
+                                        </Text>
+                                    </View>
+                                </>
+                            )}
+                        </View>
+
+                        {/* How to Interpret */}
+                        <View style={styles.methodSection}>
+                            <View style={styles.methodHeader}>
+                                <View style={[styles.methodIcon, { backgroundColor: `${colors.chart1}15` }]}>
+                                    <Info size={20} color={colors.chart1} />
+                                </View>
+                                <Text style={styles.methodTitle}>Score Interpretation</Text>
+                            </View>
+
+                            <View style={styles.interpretRow}>
+                                <View style={[styles.interpretBadge, { backgroundColor: colors.chart1 }]}>
+                                    <Text style={styles.interpretScore}>70-100</Text>
+                                </View>
+                                <View style={styles.interpretInfo}>
+                                    <Text style={styles.interpretLabel}>Safe</Text>
+                                    <Text style={styles.interpretDesc}>Excellent choice for the selected age group</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.interpretRow}>
+                                <View style={[styles.interpretBadge, { backgroundColor: colors.chart2 }]}>
+                                    <Text style={styles.interpretScore}>40-69</Text>
+                                </View>
+                                <View style={styles.interpretInfo}>
+                                    <Text style={styles.interpretLabel}>Caution</Text>
+                                    <Text style={styles.interpretDesc}>Some concerns - review details before consuming</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.interpretRow}>
+                                <View style={[styles.interpretBadge, { backgroundColor: colors.chart3 }]}>
+                                    <Text style={styles.interpretScore}>0-39</Text>
+                                </View>
+                                <View style={styles.interpretInfo}>
+                                    <Text style={styles.interpretLabel}>Avoid</Text>
+                                    <Text style={styles.interpretDesc}>Not recommended for the selected profile</Text>
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Disclaimer */}
+                        <View style={[styles.methodSection, styles.disclaimerSection]}>
+                            <Text style={styles.disclaimerText}>
+                                Our scores are for informational purposes only and should not replace
+                                professional medical advice. Always consult with a healthcare provider
+                                for specific dietary concerns.
+                            </Text>
+                        </View>
+
+                        <View style={{ height: 40 }} />
+                    </ScrollView>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -245,6 +886,7 @@ const styles = StyleSheet.create({
     scoreRowInfo: { flex: 1 },
     scoreRowLabel: { fontSize: 12, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: 2 },
     scoreRowDesc: { fontSize: 10, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
+    tooltipText: { fontSize: 10, fontFamily: fonts.sans.regular, color: colors.primary, marginTop: 4, fontStyle: 'italic' },
     scoreRowValue: { flexDirection: 'row', alignItems: 'baseline' },
     scoreRowNumber: { fontSize: 14, fontFamily: fonts.sans.bold },
     scoreRowMax: { fontSize: 10, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
@@ -254,6 +896,22 @@ const styles = StyleSheet.create({
     prefNote: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: spacing[4], borderTopWidth: 1, borderTopColor: `${colors.border}30` },
     prefNoteLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], flex: 1 },
     prefNoteText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground, flex: 1 },
+    // Why Not 100%? section styles
+    whyNotSection: { marginTop: spacing[4], padding: spacing[3], backgroundColor: `${colors.primary}08`, borderRadius: radius.xl, borderWidth: 1, borderColor: `${colors.primary}20` },
+    whyNotTitle: { fontSize: 13, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: spacing[2] },
+    whyNotList: { gap: spacing[1] },
+    whyNotItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2] },
+    whyNotBullet: { fontSize: 12, color: colors.primary },
+    whyNotText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground, flex: 1 },
+    whyNotMore: { fontSize: 11, fontFamily: fonts.sans.medium, color: colors.primary, marginTop: spacing[1] },
+    // Who Should Be Cautious section styles
+    cautionSection: { marginTop: spacing[4], padding: spacing[3], backgroundColor: `${colors.chart2}08`, borderRadius: radius.xl, borderWidth: 1, borderColor: `${colors.chart2}20` },
+    cautionTitle: { fontSize: 13, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: spacing[2] },
+    cautionList: { gap: spacing[2] },
+    cautionItem: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+    cautionBadge: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+    cautionEmoji: { fontSize: 14 },
+    cautionText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.foreground, flex: 1 },
     section: { marginBottom: spacing[8] },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing[4], paddingHorizontal: spacing[1] },
     sectionTitle: { fontSize: 10, fontFamily: fonts.sans.bold, color: colors.primary, letterSpacing: 2 },
@@ -266,12 +924,160 @@ const styles = StyleSheet.create({
     memberStatusDot: { position: 'absolute', bottom: -4, right: -4, width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.card },
     memberName: { fontSize: 16, fontFamily: fonts.sans.bold, color: colors.foreground },
     memberAge: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
-    memberRight: { alignItems: 'flex-end', gap: spacing[1] },
+    memberRight: { flex: 1, alignItems: 'flex-end', gap: spacing[1], marginLeft: spacing[4] },
     memberStatusBadge: { paddingHorizontal: spacing[3], paddingVertical: spacing[1], borderRadius: radius.full, borderWidth: 1 },
     memberStatusText: { fontSize: 10, fontFamily: fonts.sans.bold, letterSpacing: 0.5 },
-    memberTip: { fontSize: 10, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
+    memberTip: { fontSize: 10, fontFamily: fonts.sans.regular, color: colors.mutedForeground, textAlign: 'right' },
     summaryCard: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[3], padding: spacing[4], backgroundColor: colors.muted, borderRadius: radius['2xl'], borderWidth: 1, borderColor: `${colors.border}50` },
     summaryContent: { flex: 1 },
     summaryLabel: { fontSize: 12, fontFamily: fonts.sans.bold, color: colors.primary, marginBottom: spacing[1] },
     summaryText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground, lineHeight: 18 },
+
+    // Modal styles
+    modalContainer: { flex: 1, backgroundColor: colors.background },
+    modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing[6], paddingVertical: spacing[4], borderBottomWidth: 1, borderBottomColor: `${colors.border}30` },
+    modalTitle: { fontSize: 18, fontFamily: fonts.heading.bold, color: colors.foreground },
+    modalCloseBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.muted, alignItems: 'center', justifyContent: 'center' },
+    modalScroll: { flex: 1 },
+    modalContent: { padding: spacing[6] },
+
+    methodSection: { marginBottom: spacing[6], backgroundColor: colors.card, borderRadius: radius['2xl'], padding: spacing[5], borderWidth: 1, borderColor: `${colors.border}30` },
+    methodHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], marginBottom: spacing[4] },
+    methodIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    methodTitle: { fontSize: 16, fontFamily: fonts.sans.bold, color: colors.foreground },
+    methodText: { fontSize: 13, fontFamily: fonts.sans.regular, color: colors.mutedForeground, lineHeight: 20 },
+
+    categoryItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[3], paddingVertical: spacing[3], borderBottomWidth: 1, borderBottomColor: `${colors.border}20` },
+    categoryBadge: { width: 28, height: 28, borderRadius: 8, backgroundColor: `${colors.muted}80`, alignItems: 'center', justifyContent: 'center' },
+    categoryInfo: { flex: 1 },
+    categoryName: { fontSize: 13, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: 2 },
+    categoryDesc: { fontSize: 11, fontFamily: fonts.sans.regular, color: colors.mutedForeground, lineHeight: 16 },
+
+    sourceItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[3], paddingVertical: spacing[2] },
+    sourceText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground, flex: 1, lineHeight: 18 },
+    sourceBold: { fontFamily: fonts.sans.bold, color: colors.foreground },
+
+    interpretRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[4], paddingVertical: spacing[3], borderBottomWidth: 1, borderBottomColor: `${colors.border}20` },
+    interpretBadge: { width: 56, paddingVertical: spacing[2], borderRadius: radius.lg, alignItems: 'center', justifyContent: 'center' },
+    interpretScore: { fontSize: 11, fontFamily: fonts.sans.bold, color: '#fff' },
+    interpretInfo: { flex: 1 },
+    interpretLabel: { fontSize: 14, fontFamily: fonts.sans.bold, color: colors.foreground },
+    interpretDesc: { fontSize: 11, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
+
+    disclaimerSection: { backgroundColor: `${colors.chart2}10`, borderColor: `${colors.chart2}30` },
+    disclaimerText: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground, lineHeight: 18 },
+
+    // Personal Concerns styles (Phase 3)
+    personalConcernsCard: {
+        backgroundColor: colors.card,
+        borderRadius: radius['3xl'],
+        padding: spacing[6],
+        marginBottom: spacing[8],
+        borderWidth: 1,
+        borderColor: `${colors.destructive}30`,
+    },
+    personalConcernsHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing[3],
+        marginBottom: spacing[5],
+    },
+    personalConcernsIconBg: {
+        width: 40,
+        height: 40,
+        borderRadius: radius.xl,
+        backgroundColor: `${colors.destructive}15`,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    personalConcernsHeaderText: {
+        flex: 1,
+    },
+    personalConcernsTitle: {
+        fontSize: 16,
+        fontFamily: fonts.sans.bold,
+        color: colors.foreground,
+    },
+    personalConcernsSubtitle: {
+        fontSize: 12,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        marginTop: 2,
+    },
+    personalConcernsList: {
+        gap: spacing[3],
+    },
+    personalConcernItem: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: spacing[4],
+        backgroundColor: `${colors.muted}30`,
+        borderRadius: radius.xl,
+        borderWidth: 1,
+        borderColor: `${colors.border}30`,
+    },
+    personalConcernItemCritical: {
+        backgroundColor: `${colors.destructive}10`,
+        borderColor: `${colors.destructive}30`,
+    },
+    personalConcernLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing[3],
+        flex: 1,
+    },
+    personalConcernText: {
+        flex: 1,
+    },
+    personalConcernName: {
+        fontSize: 13,
+        fontFamily: fonts.sans.bold,
+        color: colors.foreground,
+        marginBottom: 2,
+    },
+    personalConcernReason: {
+        fontSize: 11,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        lineHeight: 16,
+    },
+    personalConcernBadge: {
+        paddingHorizontal: spacing[3],
+        paddingVertical: spacing[1],
+        borderRadius: radius.full,
+        borderWidth: 1,
+    },
+    personalConcernBadgeCritical: {
+        backgroundColor: `${colors.destructive}15`,
+        borderColor: `${colors.destructive}30`,
+    },
+    personalConcernBadgeCaution: {
+        backgroundColor: `${colors.chart2}15`,
+        borderColor: `${colors.chart2}30`,
+    },
+    personalConcernBadgeText: {
+        fontSize: 9,
+        fontFamily: fonts.sans.bold,
+        color: colors.chart2,
+        letterSpacing: 0.5,
+    },
+    personalConcernBadgeTextCritical: {
+        color: colors.destructive,
+    },
+    personalConcernsFooter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing[2],
+        marginTop: spacing[4],
+        paddingTop: spacing[4],
+        borderTopWidth: 1,
+        borderTopColor: `${colors.border}30`,
+    },
+    personalConcernsFooterText: {
+        fontSize: 11,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        flex: 1,
+    },
 });

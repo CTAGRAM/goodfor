@@ -9,7 +9,18 @@
 			"distribution": "internal"
 		},
 		"preview": {
-			"distribution": "internal"
+			"distribution": "internal",
+			"android": {
+				"buildType": "apk"
+			},
+			"env": {
+				"EXPO_PUBLIC_SUPABASE_URL": "https://yiilubsznpyiswpvqyhy.supabase.co",
+				"EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlpaWx1YnN6bnB5aXN3cHZxeWh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3NzMyOTAsImV4cCI6MjA4MzM0OTI5MH0.Z27VXjmJFaoxSrRM-sIx2W9RU8pxBFa3CKlrfXoq0WM",
+				"EXPO_PUBLIC_OPENAI_API_KEY": "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",
+				"EXPO_PUBLIC_REVENUECAT_API_KEY": "goog_vyKePhRgZxOMlJtwAsrlsRMTXpK",
+				"EXPO_PUBLIC_APP_URL": "https://e012cf0e-6d71-4606-b951-077918626677.created.app",
+				"EXPO_PUBLIC_CREATE_ENV": "PRODUCTION"
+			}
 		},
 		"production": {
 			"autoIncrement": true

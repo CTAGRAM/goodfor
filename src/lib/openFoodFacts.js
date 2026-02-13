@@ -6,6 +6,15 @@
 const BASE_URL = 'https://world.openfoodfacts.org/api/v2';
 const USER_AGENT = 'GoodFor/1.0 (contact@goodfor.app)';
 
+// V4: Country subdomain mapping for region-filtered results
+const COUNTRY_SUBDOMAINS = {
+    'US': 'us', 'GB': 'uk', 'UK': 'uk', 'FR': 'fr', 'DE': 'de', 'ES': 'es',
+    'IT': 'it', 'NL': 'nl', 'BE': 'be', 'CH': 'ch', 'AT': 'at', 'AU': 'au',
+    'CA': 'ca', 'SE': 'se', 'NO': 'no', 'DK': 'dk', 'FI': 'fi', 'PL': 'pl',
+    'PT': 'pt', 'BR': 'br', 'MX': 'mx', 'IN': 'in', 'JP': 'jp', 'KR': 'kr',
+    'SG': 'sg', 'HK': 'hk', 'AE': 'world', 'SA': 'world', 'ZA': 'za',
+};
+
 // Rate limiting: 100 requests/minute for products
 const RATE_LIMIT_INTERVAL = 600; // 600ms between requests = 100/minute
 let lastRequestTime = 0;
@@ -38,6 +47,11 @@ export async function getProductByBarcode(barcode) {
             },
         });
 
+        // 404 means product not found - return null instead of throwing
+        if (response.status === 404) {
+            return null;
+        }
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -52,7 +66,8 @@ export async function getProductByBarcode(barcode) {
         return parseProduct(data.product);
     } catch (error) {
         console.error('OpenFoodFacts API error:', error);
-        throw error;
+        // Return null on network errors to allow fallback
+        return null;
     }
 }
 
@@ -97,9 +112,17 @@ export async function searchProducts(query, page = 1) {
  * @returns {Object} Normalized product object
  */
 function parseProduct(rawProduct) {
+    // Better name fallback chain
+    const productName = rawProduct.product_name
+        || rawProduct.generic_name
+        || rawProduct.product_name_en
+        || (rawProduct.brands ? `${rawProduct.brands} Product` : null)
+        || (rawProduct.categories_tags?.[0] ? rawProduct.categories_tags[0].replace('en:', '').replace(/-/g, ' ') : null)
+        || `Product ${rawProduct.code}`;
+
     return {
         barcode: rawProduct.code || '',
-        name: rawProduct.product_name || rawProduct.generic_name || 'Unknown Product',
+        name: productName,
         brand: rawProduct.brands || '',
         imageUrl: rawProduct.image_url || rawProduct.image_front_url || null,
 
@@ -130,6 +153,15 @@ function parseProduct(rawProduct) {
         nutriScore: rawProduct.nutrition_grades || null,
         novaGroup: rawProduct.nova_group || null,
         ecoScore: rawProduct.ecoscore_grade || null,
+
+        // V4: Environmental data enrichment
+        ecoScoreData: rawProduct.ecoscore_data || null,
+        packaging: rawProduct.packaging || null,
+        packaging_tags: rawProduct.packaging_tags || [],
+        countries_tags: rawProduct.countries_tags || [],
+        carbonFootprint: rawProduct.ecoscore_data?.agribalyse?.co2_total
+            || rawProduct.carbon_footprint_percent_of_known_ingredients || null,
+        labels_tags: rawProduct.labels_tags || [],
 
         // Categories
         categories: rawProduct.categories_tags || [],
@@ -193,66 +225,226 @@ export function containsAllergen(product, allergen) {
 
 /**
  * Get safer alternatives for a product
+ * V4: Now supports country and category filtering
  * @param {Object} product - Current product
  * @param {number} count - Number of alternatives to return
+ * @param {Object} options - { country: 'US', categoryTags: [...] }
  * @returns {Promise<Array>} Array of alternative products
  */
-export async function getAlternatives(product, count = 5) {
+export async function getAlternatives(product, count = 5, options = {}) {
     try {
-        // Get search term from category or product name
-        let searchTerm = '';
-        if (product.categories && product.categories.length > 0) {
-            searchTerm = product.categories[0].replace('en:', '').replace(/-/g, ' ');
-        } else if (product.name) {
-            // Use first word of product name as fallback
-            searchTerm = product.name.split(' ')[0];
+        const allAlternatives = [];
+        const seenBarcodes = new Set([product.barcode]);
+
+        // V4: Determine country-specific base URL
+        const countryCode = options.country || 'US';
+        const subdomain = COUNTRY_SUBDOMAINS[countryCode.toUpperCase()] || 'world';
+        const countryBaseUrl = `https://${subdomain}.openfoodfacts.org`;
+        console.log('[Alternatives] Using country:', countryCode, '→', countryBaseUrl);
+
+        // V4: Get category tags for filtering (use first 2 for broader but relevant matches)
+        const productCategories = product.categories || options.categoryTags || [];
+        const filterCategories = productCategories.slice(0, 2);
+
+        // V4: Helper to check category overlap
+        const hasMatchingCategory = (altCategories) => {
+            if (!filterCategories.length || !altCategories?.length) return true; // no filter = pass all
+            return filterCategories.some(cat => altCategories.includes(cat));
+        };
+
+        // Strategy 1: Category-based search (MOST EFFECTIVE)
+        // V4 FIX: Use most specific category (last in list) instead of generic (first)
+        // e.g. use "en:chocolate-biscuits" instead of "en:snacks"
+        if (productCategories.length > 0) {
+            // Filter out internal/administrative tags
+            const validCategories = productCategories.filter(c => !c.includes(':') || c.startsWith('en:'));
+            const categoryTag = validCategories[validCategories.length - 1] || productCategories[0];
+
+            console.log('[Alternatives] Strategy 1: Specific Category search:', categoryTag);
+
+            try {
+                await enforceRateLimit();
+                // V4: Add country filtering explicitly to query params
+                // Note: The subdomain handles most of it, but this reinforces it
+                const categoryUrl = `${countryBaseUrl}/category/${categoryTag}.json?page_size=${count * 6}&fields=code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments,categories_tags`;
+
+                const response = await fetch(categoryUrl, {
+                    headers: { 'User-Agent': USER_AGENT },
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('[Alternatives] Category raw results:', data.products?.length || 0);
+
+                    const products = (data.products || [])
+                        .filter(p => !seenBarcodes.has(p.code) && p.product_name)
+                        // V4: Filter by category overlap (at least 1 shared category)
+                        .filter(p => hasMatchingCategory(p.categories_tags))
+                        .sort((a, b) => {
+                            const gradeOrder = { 'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'unknown': 5 };
+                            return (gradeOrder[a.nutriscore_grade] || 5) - (gradeOrder[b.nutriscore_grade] || 5);
+                        });
+
+                    products.slice(0, count).forEach(p => {
+                        seenBarcodes.add(p.code);
+                        allAlternatives.push(parseProduct(p));
+                    });
+                    console.log('[Alternatives] Category search found:', products.length, 'products, kept:', Math.min(products.length, count));
+                } else {
+                    console.log('[Alternatives] Category search failed with status:', response.status);
+                }
+            } catch (e) {
+                console.log('[Alternatives] Category search error:', e.message);
+            }
         }
 
-        if (!searchTerm) {
-            console.log('No search term for alternatives');
-            return [];
+        // Return if we have enough
+        if (allAlternatives.length >= count) {
+            return allAlternatives.slice(0, count);
         }
 
-        console.log('[Alternatives] Searching for:', searchTerm);
-        await enforceRateLimit();
+        // Strategy 2: Text search with simplified category name
+        const searchTerms = [];
 
-        // Use text search with nutriscore filter
-        const params = new URLSearchParams({
-            search_terms: searchTerm,
-            nutrition_grades_tags: 'a,b',
-            page_size: String(count * 3),
-            fields: 'code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments,categories_tags',
-            sort_by: 'unique_scans_n',
-        });
-
-        const response = await fetch(`${BASE_URL}/search?${params}`, {
-            headers: {
-                'User-Agent': USER_AGENT,
-            },
-        });
-
-        if (!response.ok) {
-            console.log('[Alternatives] API error:', response.status);
-            return [];
+        // Extract clean category name
+        if (productCategories.length > 0) {
+            const cleanCategory = productCategories[0]
+                .replace('en:', '')
+                .replace(/-/g, ' ')
+                .split(' ')
+                .filter(w => w.length > 2)
+                .slice(0, 2)
+                .join(' ');
+            if (cleanCategory && cleanCategory.length > 3) {
+                searchTerms.push(cleanCategory);
+            }
         }
 
-        const data = await response.json();
-        const products = data.products || [];
-        console.log('[Alternatives] Found', products.length, 'products');
+        // Add product type keywords
+        if (product.name && product.name !== 'Unknown Product') {
+            const nameWords = product.name
+                .toLowerCase()
+                .split(/\s+/)
+                .filter(w => w.length > 3 && !['with', 'and', 'the', 'for'].includes(w));
+            if (nameWords.length > 0) {
+                searchTerms.push(nameWords[0]);
+            }
+        }
 
-        // Filter out the current product and parse
-        const alternatives = products
-            .filter(p => p.code !== product.barcode && p.product_name)
-            .slice(0, count)
-            .map(parseProduct);
+        // Try each search term
+        for (const searchTerm of searchTerms) {
+            if (allAlternatives.length >= count) break;
 
-        console.log('[Alternatives] Returning', alternatives.length, 'alternatives');
-        return alternatives;
+            console.log('[Alternatives] Strategy 2: Text search:', searchTerm);
+            await enforceRateLimit();
+
+            const params = new URLSearchParams({
+                search_terms: searchTerm,
+                page_size: String(count * 4),
+                fields: 'code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments,categories_tags',
+                sort_by: 'unique_scans_n',
+                cc: countryCode.toLowerCase(), // V4: Filter by country code
+            });
+
+            try {
+                // V4: Use country-specific API
+                const response = await fetch(`${countryBaseUrl}/api/v2/search?${params}`, {
+                    headers: { 'User-Agent': USER_AGENT },
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('[Alternatives] Text search raw results:', data.products?.length || 0, 'for:', searchTerm);
+
+                    const products = (data.products || [])
+                        .filter(p => !seenBarcodes.has(p.code) && p.product_name)
+                        // V4: Filter by category overlap
+                        .filter(p => hasMatchingCategory(p.categories_tags))
+                        .sort((a, b) => {
+                            const gradeOrder = { 'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'unknown': 5 };
+                            return (gradeOrder[a.nutriscore_grade] || 5) - (gradeOrder[b.nutriscore_grade] || 5);
+                        });
+
+                    products.slice(0, count - allAlternatives.length).forEach(p => {
+                        seenBarcodes.add(p.code);
+                        allAlternatives.push(parseProduct(p));
+                    });
+                    console.log('[Alternatives] Text search found:', products.length, 'products for:', searchTerm);
+                } else {
+                    console.log('[Alternatives] Text search failed with status:', response.status, 'for:', searchTerm);
+                }
+            } catch (e) {
+                console.log('[Alternatives] Text search error:', e.message);
+            }
+        }
+
+        // Strategy 3: Product-specific fallback if still no results
+        if (allAlternatives.length === 0) {
+            // Build a search term from product name/categories instead of generic "organic natural"
+            const fallbackTerms = [];
+
+            // Extract meaningful words from product name
+            const nameWords = (product.name || '')
+                .toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')
+                .split(/\s+/)
+                .filter(w => w.length > 3 && !['with', 'and', 'the', 'for', 'from', 'pack', 'size', 'original', 'classic', 'flavour', 'flavor'].includes(w));
+            if (nameWords.length > 0) {
+                fallbackTerms.push(nameWords.slice(0, 2).join(' '));
+            }
+
+            // Extract clean category name
+            if (productCategories.length > 0) {
+                const cleanCat = productCategories[productCategories.length - 1] // Most specific category (last one)
+                    .replace('en:', '')
+                    .replace(/-/g, ' ');
+                if (cleanCat.length > 2) fallbackTerms.push(cleanCat);
+            }
+
+            // Use first available term, or give up with a readable message
+            const fallbackSearch = fallbackTerms[0] || 'healthy snack';
+            console.log('[Alternatives] Strategy 3: Product-specific fallback:', fallbackSearch);
+            await enforceRateLimit();
+
+            const params = new URLSearchParams({
+                search_terms: fallbackSearch,
+                nutrition_grades_tags: 'a,b',
+                page_size: String(count * 3),
+                fields: 'code,product_name,brands,image_url,nutriscore_grade,nova_group,additives_tags,allergens_tags,nutriments,categories_tags',
+                sort_by: 'unique_scans_n',
+                cc: countryCode.toLowerCase(), // V4: Filter by country
+            });
+
+            try {
+                // V4: Use country-specific API for fallback too
+                const response = await fetch(`${countryBaseUrl}/api/v2/search?${params}`, {
+                    headers: { 'User-Agent': USER_AGENT },
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const products = (data.products || [])
+                        .filter(p => !seenBarcodes.has(p.code) && p.product_name)
+                        .slice(0, count);
+
+                    products.forEach(p => {
+                        allAlternatives.push(parseProduct(p));
+                    });
+                    console.log('[Alternatives] Fallback found:', products.length, 'products for:', fallbackSearch);
+                }
+            } catch (e) {
+                console.log('[Alternatives] Fallback search error:', e.message);
+            }
+        }
+
+        console.log('[Alternatives] Total returning:', allAlternatives.length, 'alternatives');
+        return allAlternatives.slice(0, count);
     } catch (error) {
         console.error('[Alternatives] Error:', error.message);
         return [];
     }
 }
+
 
 export default {
     getProductByBarcode,

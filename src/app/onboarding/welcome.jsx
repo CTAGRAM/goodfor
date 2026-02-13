@@ -1,13 +1,8 @@
-import { View, Text, Pressable, ScrollView } from "react-native";
+import { View, Text, Pressable, Image } from "react-native";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import {
-  ShieldCheck,
-  CheckCircle2,
-  Heart,
-  ArrowRight,
-} from "lucide-react-native";
+import { CheckCircle, ArrowRight, Star, Leaf } from "lucide-react-native";
 import { colors } from "@/constants/theme";
 
 export default function Welcome() {
@@ -15,324 +10,315 @@ export default function Welcome() {
   const insets = useSafeAreaInsets();
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: "#f5f6f5" }}>
       <StatusBar style="dark" />
 
-      {/* Background blurs */}
-      <View
-        style={{
-          position: "absolute",
-          top: -128,
-          right: -128,
-          width: 256,
-          height: 256,
-          backgroundColor: colors.accent,
-          opacity: 0.3,
-          borderRadius: 128,
-        }}
-      />
-      <View
-        style={{
-          position: "absolute",
-          bottom: 200,
-          left: -96,
-          width: 192,
-          height: 192,
-          backgroundColor: colors.chart1,
-          opacity: 0.05,
-          borderRadius: 96,
-        }}
-      />
-
-      {/* Header */}
-      <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 24 }}>
-        <Pressable
-          onPress={() => router.back()}
-          style={{
-            width: 44,
-            height: 44,
-            marginLeft: -12,
-            borderRadius: 22,
-            alignItems: "center",
-            justifyContent: "center",
+      {/* Header - GoodFor Logo */}
+      <View style={{ paddingTop: insets.top + 20, alignItems: "center" }}>
+        <Image
+          source={{
+            uri: "https://ggrhecslgdflloszjkwl.supabase.co/storage/v1/object/public/user-assets/onAkNUUAGm7/ai/GoodFor-1-x16DQfFL43Z.png",
           }}
-        >
-          <Text style={{ fontSize: 24 }}>←</Text>
-        </Pressable>
+          style={{ width: 150, height: 36 }}
+          resizeMode="contain"
+        />
       </View>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 32 }}
-      >
-        {/* Hero illustration */}
-        <View style={{ marginTop: 32, marginBottom: 40, alignItems: "center" }}>
-          <View
-            style={{
-              width: 240,
-              height: 240,
-              backgroundColor: "rgba(255,255,255,0.4)",
-              borderRadius: 120,
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.05,
-              shadowRadius: 8,
-              borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.5)",
-            }}
-          >
-            <View
-              style={{
-                width: 192,
-                height: 192,
-                backgroundColor: colors.accent,
-                opacity: 0.5,
-                borderRadius: 96,
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <ShieldCheck
-                size={96}
-                color={colors.primary}
-                style={{ opacity: 0.8 }}
-              />
-            </View>
-
-            {/* Floating badge */}
-            <View
-              style={{
-                position: "absolute",
-                top: -8,
-                right: -8,
-                width: 56,
-                height: 56,
-                backgroundColor: colors.card,
-                borderRadius: 16,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                borderWidth: 1,
-                borderColor: colors.border,
-                opacity: 0.5,
-                alignItems: "center",
-                justifyContent: "center",
-                transform: [{ rotate: "12deg" }],
-              }}
-            >
-              <CheckCircle2 size={28} color={colors.chart1} />
-            </View>
-
-            {/* Floating heart */}
-            <View
-              style={{
-                position: "absolute",
-                bottom: -16,
-                left: -8,
-                width: 48,
-                height: 48,
-                backgroundColor: colors.card,
-                borderRadius: 24,
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-                borderWidth: 1,
-                borderColor: colors.border,
-                opacity: 0.5,
-                alignItems: "center",
-                justifyContent: "center",
-                transform: [{ rotate: "-12deg" }],
-              }}
-            >
-              <Heart
-                size={24}
-                color={colors.destructive}
-                fill={colors.destructive}
-              />
-            </View>
-          </View>
-        </View>
-
-        {/* Pagination dots */}
+      {/* Main Content Container */}
+      <View style={{ flex: 1, paddingHorizontal: 24 }}>
+        {/* Family Safe Badge */}
         <View
           style={{
+            marginTop: 32,
+            alignSelf: "flex-start",
             flexDirection: "row",
-            gap: 8,
-            marginBottom: 40,
-            justifyContent: "center",
+            alignItems: "center",
+            gap: 6,
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            backgroundColor: "#d4f0d9",
+            borderRadius: 20,
           }}
         >
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: colors.chart1,
-            }}
-          />
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: colors.mutedForeground,
-              opacity: 0.3,
-            }}
-          />
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: colors.mutedForeground,
-              opacity: 0.3,
-            }}
-          />
-        </View>
-
-        {/* Content */}
-        <View style={{ gap: 24 }}>
+          <CheckCircle size={16} color="#3b7a4d" fill="#3b7a4d" />
           <Text
             style={{
-              fontSize: 34,
-              fontFamily: "Rubik_800ExtraBold",
-              color: colors.foreground,
-              lineHeight: 38,
-              letterSpacing: -0.5,
+              fontSize: 13,
+              fontFamily: "Rubik_600SemiBold",
+              color: "#3b7a4d",
             }}
           >
-            Make safer choices{"\n"}for your family
-          </Text>
-
-          <Text
-            style={{
-              fontSize: 17,
-              color: colors.mutedForeground,
-              lineHeight: 26,
-              maxWidth: "90%",
-            }}
-          >
-            Scan everyday products and get clear, age-aware safety ratings you
-            can understand and trust.
+            Family Safe
           </Text>
         </View>
 
-        {/* Badge */}
-        <View
-          style={{
-            marginTop: 40,
-            flexDirection: "row",
-            flexWrap: "wrap",
-            gap: 8,
-          }}
-        >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 8,
-              paddingHorizontal: 16,
-              paddingVertical: 8,
-              backgroundColor: colors.accent,
-              opacity: 0.3,
-              borderRadius: 20,
-              borderWidth: 1,
-              borderColor: colors.accent,
-              opacity: 0.2,
-            }}
-          >
-            <Text style={{ fontSize: 16 }}>⭐</Text>
+        {/* Main Title with Panda Overlay */}
+        <View style={{ marginTop: 24, position: "relative" }}>
+          {/* Text Content */}
+          <View style={{ zIndex: 2 }}>
             <Text
               style={{
-                fontSize: 12,
-                fontFamily: "Rubik_700Bold",
-                color: colors.primary,
-                letterSpacing: 1,
-                textTransform: "uppercase",
+                fontSize: 44,
+                fontFamily: "Rubik_800ExtraBold",
+                color: "#1a1a1a",
+                lineHeight: 52,
+                letterSpacing: -1,
               }}
             >
-              Trusted by Parents
+              Make Better
             </Text>
+            <Text
+              style={{
+                fontSize: 44,
+                fontFamily: "Rubik_800ExtraBold",
+                color: "#4a9960",
+                lineHeight: 52,
+                letterSpacing: -1,
+              }}
+            >
+              Choices
+            </Text>
+            <Text
+              style={{
+                fontSize: 44,
+                fontFamily: "Rubik_800ExtraBold",
+                color: "#1a1a1a",
+                lineHeight: 52,
+                letterSpacing: -1,
+              }}
+            >
+              Calmly.
+            </Text>
+
+            {/* Subtitle */}
+            <Text
+              style={{
+                marginTop: 16,
+                fontSize: 16,
+                color: "#6c7570",
+                lineHeight: 24,
+                fontFamily: "Rubik_400Regular",
+                maxWidth: "65%",
+              }}
+            >
+              Food & skincare safety,{"\n"}explained for your family.
+            </Text>
+          </View>
+
+          {/* Floating Leaf Top Right */}
+          <View
+            style={{
+              position: "absolute",
+              top: 60,
+              right: 20,
+              width: 40,
+              height: 40,
+              zIndex: 3,
+            }}
+          >
+            <Leaf size={28} color="#4a9960" style={{ transform: [{ rotate: "25deg" }] }} />
+          </View>
+
+          {/* Panda Image - Positioned to overlap */}
+          <View
+            style={{
+              position: "absolute",
+              right: -40,
+              top: 120,
+              width: 340,
+              height: 340,
+              zIndex: 1,
+            }}
+          >
+            <Image
+              source={require("../../../assets/images/panda-bamboo.png")}
+              style={{ width: "100%", height: "100%" }}
+              resizeMode="contain"
+            />
+          </View>
+
+          {/* Floating Leaf Bottom Right */}
+          <View
+            style={{
+              position: "absolute",
+              right: 10,
+              top: 380,
+              width: 40,
+              height: 40,
+              zIndex: 3,
+            }}
+          >
+            <Leaf size={24} color="#4a9960" style={{ transform: [{ rotate: "-15deg" }] }} />
           </View>
         </View>
 
+        {/* Trusted Badge */}
+        <View
+          style={{
+            marginTop: 320,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            paddingHorizontal: 14,
+            paddingVertical: 10,
+            backgroundColor: "#f0f4f1",
+            borderRadius: 20,
+            alignSelf: "flex-start",
+          }}
+        >
+          <Star size={16} color="#243628" fill="#243628" />
+          <Text
+            style={{
+              fontSize: 12,
+              fontFamily: "Rubik_700Bold",
+              color: "#243628",
+              letterSpacing: 0.5,
+            }}
+          >
+            Trusted by Parents
+          </Text>
+        </View>
 
-      </ScrollView>
+        {/* Description */}
+        <Text
+          style={{
+            marginTop: 24,
+            fontSize: 16,
+            color: "#6c7570",
+            lineHeight: 26,
+            fontFamily: "Rubik_400Regular",
+            maxWidth: "90%",
+          }}
+        >
+          Scan everyday products and get clear, age-aware safety ratings you can
+          understand and trust.
+        </Text>
+      </View>
 
       {/* Footer */}
       <View
         style={{
-          position: "absolute",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          paddingHorizontal: 32,
-          paddingBottom: insets.bottom + 40,
-          paddingTop: 32,
-          backgroundColor: colors.background,
+          paddingHorizontal: 24,
+          paddingBottom: insets.bottom + 24,
+          paddingTop: 24,
+          backgroundColor: "#f5f6f5",
         }}
       >
+        {/* Get Started Button */}
         <Pressable
           onPress={() => router.push("/onboarding/how-scanning-works")}
           style={{
             width: "100%",
-            height: 64,
-            backgroundColor: colors.primary,
-            borderRadius: 32,
+            height: 56,
+            backgroundColor: "#2d5238",
+            borderRadius: 28,
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
-            gap: 12,
-            shadowColor: colors.primary,
+            gap: 8,
+            shadowColor: "#000",
             shadowOffset: { width: 0, height: 4 },
-            shadowOpacity: 0.3,
+            shadowOpacity: 0.15,
             shadowRadius: 8,
+            elevation: 4,
           }}
         >
           <Text
             style={{
-              flex: 1,
-              textAlign: "center",
-              color: colors.primaryForeground,
-              fontSize: 18,
+              color: "#ffffff",
+              fontSize: 17,
               fontFamily: "Rubik_700Bold",
             }}
           >
-            Get started
+            Get Started
           </Text>
           <View
             style={{
-              width: 40,
-              height: 40,
-              backgroundColor: "rgba(255,255,255,0.1)",
-              borderRadius: 20,
+              width: 28,
+              height: 28,
+              backgroundColor: "rgba(255,255,255,0.15)",
+              borderRadius: 14,
               alignItems: "center",
               justifyContent: "center",
-              marginRight: 8,
             }}
           >
-            <ArrowRight size={20} color={colors.primaryForeground} />
+            <ArrowRight size={16} color="#ffffff" />
           </View>
         </Pressable>
 
-        <Pressable
-          style={{ paddingHorizontal: 24, paddingVertical: 8, marginTop: 16 }}
+        {/* Step Indicators */}
+        <View
+          style={{
+            marginTop: 20,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 24,
+          }}
         >
-          <Text
-            style={{
-              color: colors.mutedForeground,
-              fontSize: 14,
-              fontFamily: "Rubik_600SemiBold",
-              textAlign: "center",
-            }}
-          >
-            Already have an account? Sign in
-          </Text>
-        </Pressable>
+          {/* Scan */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: "#4a9960",
+              }}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                fontFamily: "Rubik_600SemiBold",
+                color: "#1a1a1a",
+              }}
+            >
+              Scan
+            </Text>
+          </View>
+
+          {/* Understand */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: "#4a9960",
+              }}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                fontFamily: "Rubik_600SemiBold",
+                color: "#1a1a1a",
+              }}
+            >
+              Understand
+            </Text>
+          </View>
+
+          {/* Choose Better */}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <View
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                backgroundColor: "#4a9960",
+              }}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                fontFamily: "Rubik_600SemiBold",
+                color: "#1a1a1a",
+              }}
+            >
+              Choose Better
+            </Text>
+          </View>
+        </View>
       </View>
     </View>
   );

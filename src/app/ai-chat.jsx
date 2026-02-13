@@ -1,53 +1,107 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
     TouchableOpacity,
-    Image,
     TextInput,
     KeyboardAvoidingView,
     Platform,
-    ActivityIndicator
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect, useLocalSearchParams } from "expo-router";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
     ArrowLeft,
     Sparkles,
-    Camera,
-    QrCode,
     ArrowUp,
     User,
     UserCircle,
     Baby,
     Bot,
-    UserCheck
+    UserCheck,
+    MessageSquare,
+    Clock,
+    Plus,
+    Trash2,
+    ChevronRight,
+    Edit2,
+    Package
 } from "lucide-react-native";
-import { colors, fonts, spacing, radius } from "@/constants/theme";
+import { colors, fonts, radius } from "@/constants/theme";
 import { sendMessage } from "@/lib/openai";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
+import MarkdownText from "@/components/MarkdownText";
+
+const HISTORY_STORAGE_KEY = 'goodfor_chat_history';
 
 export default function AIChat() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
-    const scrollViewRef = useRef(null);
-    const { user, profile } = useAuth();
+    const params = useLocalSearchParams();
+    const { user, profile, activeFamilyMember, updateProfile } = useAuth();
 
+    // Dynamic storage key based on active profile
+    const getStorageKey = () => `goodfor_chat_history_${activeFamilyMember ? activeFamilyMember.id : 'main'}`;
+
+    // View Modes: 'history' (list of chats) | 'chat' (active conversation)
+    const [viewMode, setViewMode] = useState('history');
+
+    // Chat State
+    const [chatHistory, setChatHistory] = useState([]);
+    const [currentChatId, setCurrentChatId] = useState(null);
+    const [messages, setMessages] = useState([]);
     const [message, setMessage] = useState("");
     const [selectedAge, setSelectedAge] = useState("adult");
-    const [messages, setMessages] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
-    const [userContext, setUserContext] = useState({});
+    const [productInfo, setProductInfo] = useState(null); // Product context from scan
+    const [autoSendDone, setAutoSendDone] = useState(false);
 
-    const quickPrompts = [
-        "Is this safe?",
-        "Explain the ingredients",
-        "Any better options?",
-    ];
+    // Context State
+    const [userContext, setUserContext] = useState({});
+    const scrollViewRef = useRef(null);
+
+    const [quickPrompts, setQuickPrompts] = useState([
+        "Is this safe for kids?",
+        "Explain ingredients",
+        "Healthier options?",
+        "Any allergens?",
+    ]);
+
+    // Update prompts based on product context
+    useEffect(() => {
+        if (productInfo) {
+            if (productInfo.isBeautyProduct) {
+                setQuickPrompts([
+                    "Safe for sensitive skin?",
+                    "Explain preservatives",
+                    "Endocrine disruptors?",
+                    "Better alternatives?"
+                ]);
+            } else {
+                setQuickPrompts([
+                    "Is this healthy?",
+                    "Explain additives",
+                    "Too much sugar?",
+                    "Allergen warning?"
+                ]);
+            }
+        } else {
+            setQuickPrompts([
+                "How does scoring work?",
+                "Analyze my recent scans",
+                "Health tips for kids",
+                "Avoid list help"
+            ]);
+        }
+    }, [productInfo]);
 
     const ageOptions = [
         { id: "adult", label: "Adult", icon: User },
@@ -55,64 +109,405 @@ export default function AIChat() {
         { id: "toddler", label: "Toddler", icon: Baby },
     ];
 
-    // Fetch user context on mount
+    // Load History on Mount
     useEffect(() => {
-        const fetchUserContext = async () => {
-            if (!user?.id) return;
+        loadChatHistory();
+    }, []);
 
+    // Load Context on Focus (Real-time updates)
+    useFocusEffect(
+        useCallback(() => {
+            fetchUserContext();
+            loadChatHistory();
+        }, [user?.id, activeFamilyMember])
+    );
+
+    // Handle product context from scan result — auto-start chat
+    useEffect(() => {
+        if (params.productContext && !autoSendDone) {
             try {
-                // Fetch recent scans
-                const { data: recentScans } = await supabase
-                    .from('scans')
-                    .select('product_name, safety_level, safety_score')
-                    .eq('user_id', user.id)
-                    .order('created_at', { ascending: false })
-                    .limit(10);
-
-                // Fetch favorites
-                const { data: favorites } = await supabase
-                    .from('favorites')
-                    .select('product_name')
-                    .eq('user_id', user.id)
-                    .limit(5);
-
-                // Get allergens from profile
-                const allergens = profile?.allergens || [];
-                const dietaryPreferences = profile?.dietary_preferences || [];
-
-                setUserContext({
-                    allergens,
-                    dietaryPreferences,
-                    recentScans: recentScans || [],
-                    favorites: favorites || [],
-                });
-
-                console.log('[AIChat] User context loaded:', {
-                    allergens: allergens.length,
-                    preferences: dietaryPreferences.length,
-                    scans: recentScans?.length || 0,
-                    favorites: favorites?.length || 0,
-                });
-            } catch (error) {
-                console.error('[AIChat] Error fetching user context:', error);
+                const ctx = JSON.parse(params.productContext);
+                setProductInfo(ctx);
+                // Start a new chat immediately
+                const newId = Date.now().toString();
+                setCurrentChatId(newId);
+                setMessages([]);
+                setViewMode('chat');
+            } catch (e) {
+                console.error('[AIChat] Failed to parse productContext:', e);
             }
-        };
+        }
+    }, [params.productContext]);
 
-        fetchUserContext();
-    }, [user?.id, profile]);
+    // Auto-send the initial product analysis prompt once context is loaded
+    useEffect(() => {
+        if (productInfo && viewMode === 'chat' && !autoSendDone && messages.length === 0 && !isLoading) {
+            setAutoSendDone(true);
+            autoSendProductAnalysis(productInfo);
+        }
+    }, [productInfo, viewMode, autoSendDone, messages.length, isLoading]);
 
-    const handleSend = async () => {
-        if (!message.trim() || isLoading) return;
+    // Scroll to bottom when messages change
+    useEffect(() => {
+        if (viewMode === 'chat') {
+            setTimeout(() => {
+                scrollViewRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+        }
+    }, [messages, viewMode]);
 
-        const userMessage = { role: "user", content: message.trim() };
+    const loadChatHistory = async () => {
+        try {
+            const key = getStorageKey();
+            const jsonValue = await AsyncStorage.getItem(key);
+            if (jsonValue != null) {
+                setChatHistory(JSON.parse(jsonValue));
+            } else {
+                setChatHistory([]);
+            }
+        } catch (e) {
+            console.error("Failed to load chat history", e);
+        }
+    };
+
+    const fetchUserContext = async () => {
+        if (!user?.id) return;
+
+        try {
+            // Fetch recent scans with PRODUCT DETAILS
+            let query = supabase
+                .from('scans')
+                .select('*, products(name, brand, category, ingredients, nutrition_facts)')
+                .eq('user_id', user.id);
+
+            if (activeFamilyMember) {
+                query = query.eq('family_member_id', activeFamilyMember.id);
+            } else {
+                query = query.is('family_member_id', null);
+            }
+
+            const { data: recentScans, error: scansError } = await query
+                .order('scanned_at', { ascending: false })
+                .limit(10);
+
+            if (scansError) {
+                console.error('[AIChat] Scans fetch error:', scansError);
+            }
+
+            console.log('[AIChat] Raw scans from DB:', recentScans?.length || 0, recentScans?.slice(0, 2));
+
+            // Fetch favorites
+            const { data: favorites } = await supabase
+                .from('favorites')
+                .select('product_name')
+                .eq('user_id', user.id)
+                .limit(5);
+
+            // Fetch Family Members
+            const { data: familyMembers } = await supabase
+                .from('family_members')
+                .select('*')
+                .eq('user_id', user.id);
+
+            const formattedScans = (recentScans || []).map(s => {
+                // Fallback logic if products join returns null
+                const productName = s.products?.name || s.product_name || 'Unknown Product';
+                const brand = s.products?.brand || s.product_brand || '';
+
+                console.log('[AIChat] Scan item:', {
+                    hasProductJoin: !!s.products,
+                    productName,
+                    brand,
+                    category: s.products?.category || s.category,
+                    hasIngredients: !!s.products?.ingredients
+                });
+
+                return {
+                    product_name: productName,
+                    brand: brand,
+                    safety_level: s.safety_level,
+                    safety_score: s.safety_score,
+                    category: s.products?.category || s.category,
+                    ingredients: s.products?.ingredients?.text || null
+                };
+            });
+
+            setUserContext({
+                allergens: activeFamilyMember?.allergens || profile?.allergens || [],
+                dietaryPreferences: activeFamilyMember?.dietary_preferences || profile?.dietary_preferences || [],
+                recentScans: formattedScans,
+                favorites: (favorites || []).map(f => ({ product_name: f.product_name })),
+                familyMembers: familyMembers || [],
+                userName: activeFamilyMember?.name || profile?.full_name || 'User'
+            });
+
+            console.log('[AIChat] User context fetched:', {
+                scansCount: formattedScans.length,
+                familyCount: familyMembers?.length || 0,
+                allergens: profile?.allergens,
+                scans: formattedScans.slice(0, 2) // First 2 scans for verification
+            });
+
+        } catch (error) {
+            console.error('[AIChat] Error fetching user context:', error);
+        }
+    };
+
+    const saveHistoryToStorage = async (updatedHistory) => {
+        try {
+            const key = getStorageKey();
+            const jsonValue = JSON.stringify(updatedHistory);
+            await AsyncStorage.setItem(key, jsonValue);
+            setChatHistory(updatedHistory);
+        } catch (e) {
+            console.error("Failed to save chat history", e);
+        }
+    };
+
+    const startNewChat = () => {
+        const newId = Date.now().toString();
+        setCurrentChatId(newId);
+        setMessages([]);
+        setMessage("");
+        setProductInfo(null); // Clear product context for fresh chat
+        setAutoSendDone(false);
+        setViewMode('chat');
+    };
+
+    // Auto-send product analysis when coming from a scan
+    const autoSendProductAnalysis = async (ctx) => {
+        let autoPrompt;
+
+        if (ctx.isBeautyProduct) {
+            // Beauty-specific prompt — no food, Nutri-Score, or NOVA references
+            const issuesList = ctx.issues?.length > 0 ? `\nConcerns flagged: ${ctx.issues.join(', ')}` : '';
+            const pillarInfo = ctx.pillarScores ? `\nPillar Scores — Toxicity: ${ctx.pillarScores.toxicity ?? 'N/A'}/25, Sensitization: ${ctx.pillarScores.sensitization ?? 'N/A'}/25, Endocrine: ${ctx.pillarScores.endocrine ?? 'N/A'}/25, Environment: ${ctx.pillarScores.environment ?? 'N/A'}/15` : '';
+
+            autoPrompt = `Analyse this beauty product I just scanned:\n\n` +
+                `**${ctx.name}**${ctx.brand ? ` by ${ctx.brand}` : ''}\n` +
+                `Overall Safety Score: ${ctx.safetyScore}/100 (${ctx.safetyLevel})` +
+                pillarInfo +
+                issuesList +
+                (ctx.ingredientsText ? `\n\nFull INCI list: ${ctx.ingredientsText.substring(0, 500)}` : '') +
+                `\n\nGive me a clear breakdown of this product's safety profile based on my age group. Categorise the key ingredients by function (preservative, surfactant, active, UV filter, fragrance, etc.), flag any sensitisation or endocrine risks, and suggest gentler alternatives for any problematic ingredients.`;
+        } else {
+            // Food-specific prompt (original)
+            const issuesList = ctx.issues?.length > 0 ? `\nConcerns: ${ctx.issues.join(', ')}` : '';
+            const allergensList = ctx.allergens?.length > 0 ? `\nAllergens: ${ctx.allergens.join(', ')}` : '';
+            const additivesList = ctx.additives?.length > 0 ? `\nAdditives: ${ctx.additives.join(', ')}` : '';
+
+            autoPrompt = `Analyze this product I just scanned:\n\n` +
+                `**${ctx.name}**${ctx.brand ? ` by ${ctx.brand}` : ''}\n` +
+                `Safety Score: ${ctx.safetyScore}/100 (${ctx.safetyLevel})` +
+                (ctx.nutriGrade ? ` | Nutri-Score: ${ctx.nutriGrade.toUpperCase()}` : '') +
+                (ctx.novaGroup ? ` | NOVA: ${ctx.novaGroup}` : '') +
+                issuesList + allergensList + additivesList +
+                (ctx.ingredientsText ? `\n\nIngredients: ${ctx.ingredientsText.substring(0, 500)}` : '') +
+                `\n\nGive me a clear breakdown of whether this product is good for me based on my profile. Highlight any concerns and suggest what to watch out for.`;
+        }
+
+        const userMessage = { role: "user", content: autoPrompt };
+        const newMessages = [userMessage];
+
+        setMessages(newMessages);
+        setIsLoading(true);
+
+        try {
+            const response = await sendMessage(newMessages, selectedAge, userContext, !!ctx.isBeautyProduct);
+            const assistantMessage = { role: "assistant", content: response };
+            const finalMessages = [...newMessages, assistantMessage];
+
+            setMessages(finalMessages);
+
+            // Save to history
+            const timestamp = Date.now();
+            const title = `${ctx.name}${ctx.brand ? ` — ${ctx.brand}` : ''}`;
+
+            const activeChatId = currentChatId || timestamp.toString();
+            if (!currentChatId) setCurrentChatId(activeChatId);
+
+            const updatedHistory = [...chatHistory];
+            const chatEntry = {
+                id: activeChatId,
+                title: title.length > 35 ? title.substring(0, 35) + '...' : title,
+                timestamp,
+                messages: finalMessages,
+                preview: response.substring(0, 50) + "...",
+                productContext: ctx, // Store for future reference
+            };
+
+            updatedHistory.unshift(chatEntry);
+            await saveHistoryToStorage(updatedHistory);
+        } catch (error) {
+            setMessages([
+                ...newMessages,
+                { role: "assistant", content: "Sorry, I encountered an error analyzing this product. Please try again." }
+            ]);
+            console.error("AI auto-send error:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const openChat = (chat) => {
+        setCurrentChatId(chat.id);
+        setMessages(chat.messages || []);
+        setViewMode('chat');
+    };
+
+    const deleteChat = (id) => {
+        Alert.alert(
+            "Delete Chat",
+            "Are you sure you want to delete this conversation?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        const updated = chatHistory.filter(c => c.id !== id);
+                        await saveHistoryToStorage(updated);
+                        if (currentChatId === id) {
+                            setViewMode('history');
+                            setCurrentChatId(null);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const checkRateLimit = async () => {
+        if (!profile) return false;
+
+        const isPro = profile.subscription_tier === 'pro';
+        const limit = isPro ? 60 : 10;
+        const today = new Date().toISOString().split('T')[0];
+
+        let count = profile.daily_chat_count || 0;
+        const lastDate = profile.last_chat_date;
+
+        if (lastDate !== today) {
+            count = 0; // Reset if new day
+        }
+
+        if (count >= limit) {
+            Alert.alert(
+                "Limit Reached",
+                `You've used your ${limit} free chats for today. Upgrade to Pro for more!`,
+                [
+                    { text: "Cancel", style: "cancel" },
+                    { text: "Upgrade", onPress: () => router.push('/subscription') }
+                ]
+            );
+            return false;
+        }
+
+        // Increment locally and in DB
+        const newCount = count + 1;
+
+        // Optimistic update handled by updateProfile? 
+        // We generally want to wait for success, but let's proceed.
+        // We'll update the profile in valid send flow.
+        return { valid: true, newCount, today };
+    };
+
+    const getLimitLabel = () => {
+        const isPro = profile?.subscription_tier === 'pro';
+        const limit = isPro ? 60 : 10;
+        const count = (profile?.last_chat_date === new Date().toISOString().split('T')[0])
+            ? (profile?.daily_chat_count || 0)
+            : 0;
+        return `${limit - count} chats remaining`;
+    };
+
+    const handleSend = async (manualText = null) => {
+        const textToSend = manualText || message;
+        if (!textToSend.trim() || isLoading) return;
+
+        // Check Limit
+        const limitCheck = await checkRateLimit();
+        if (!limitCheck) return; // Limit reached
+
+        const userMsgContent = textToSend.trim();
+        const userMessage = { role: "user", content: userMsgContent };
         const newMessages = [...messages, userMessage];
+
         setMessages(newMessages);
         setMessage("");
         setIsLoading(true);
 
+        // Update Usage
+        // Update local profile state if possible, though AuthContext might not expose a setter for specific fields easily without a full reload.
+        // We will rely on the DB update and eventually the profile will refresh.
+        // But for UI responsiveness, we might want to manually decrement the "Remaining" count in a local state if we had one, 
+        // OR just trust the "Optimistic" nature of the user interaction. 
+        // For now, we just update DB.
+
         try {
-            const response = await sendMessage(newMessages, selectedAge, userContext);
-            setMessages([...newMessages, { role: "assistant", content: response }]);
+            const response = await sendMessage(newMessages, selectedAge, userContext, !!productInfo?.isBeautyProduct);
+            const assistantMessage = { role: "assistant", content: response };
+            const finalMessages = [...newMessages, assistantMessage];
+
+            setMessages(finalMessages);
+
+            // Increment Count in DB
+            // We use the limitCheck result values
+            const { newCount, today } = limitCheck;
+
+            // 1. Update DB (Remote)
+            await supabase.from('profiles').update({
+                daily_chat_count: newCount,
+                last_chat_date: today
+            }).eq('id', user.id);
+
+            // 2. Update Local Profile (Real-time UI update)
+            if (updateProfile) {
+                // This updates the context state without a network refetch, 
+                // allowing the "Remaining" count to decrement instantly.
+                updateProfile({
+                    daily_chat_count: newCount,
+                    last_chat_date: today
+                });
+            }
+
+            // Save to History
+            const timestamp = Date.now();
+            let title = "New Conversation";
+
+            // Generate title from first message
+            if (newMessages.length === 1) {
+                title = userMsgContent.length > 30 ? userMsgContent.substring(0, 30) + "..." : userMsgContent;
+            } else {
+                // Keep existing title if editing existing chat
+                const existing = chatHistory.find(c => c.id === currentChatId);
+                if (existing) title = existing.title;
+            }
+
+            const activeChatId = currentChatId || timestamp.toString();
+            if (!currentChatId) setCurrentChatId(activeChatId);
+
+            const updatedHistory = [...chatHistory];
+            const existingIndex = updatedHistory.findIndex(c => c.id === activeChatId);
+
+            const chatEntry = {
+                id: activeChatId,
+                title,
+                timestamp,
+                messages: finalMessages,
+                preview: response.substring(0, 50) + "..."
+            };
+
+            if (existingIndex >= 0) {
+                updatedHistory[existingIndex] = chatEntry;
+                // Move to top
+                updatedHistory.sort((a, b) => b.timestamp - a.timestamp);
+            } else {
+                updatedHistory.unshift(chatEntry);
+            }
+
+            await saveHistoryToStorage(updatedHistory);
+
         } catch (error) {
             setMessages([
                 ...newMessages,
@@ -124,62 +519,116 @@ export default function AIChat() {
         }
     };
 
-    useEffect(() => {
-        // Scroll to bottom when messages change
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, [messages]);
+    const renderHistoryItem = ({ item }) => (
+        <TouchableOpacity
+            style={styles.historyCard}
+            onPress={() => openChat(item)}
+        >
+            <View style={styles.historyIcon}>
+                <MessageSquare size={20} color={colors.primary} />
+            </View>
+            <View style={styles.historyInfo}>
+                <Text style={styles.historyTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.historyDate}>
+                    {new Date(item.timestamp).toLocaleDateString()} • {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+            </View>
+            <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={() => deleteChat(item.id)}
+            >
+                <Trash2 size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+        </TouchableOpacity>
+    );
 
-    return (
+    const renderAvatar = () => {
+        const avatarUrl = activeFamilyMember ? activeFamilyMember.avatar_url : profile?.avatar_url;
+
+        if (avatarUrl) {
+            return (
+                <Image
+                    source={{ uri: avatarUrl }}
+                    style={styles.headerAvatar}
+                />
+            );
+        }
+        return (
+            <View style={styles.headerAvatarFallback}>
+                <User size={20} color={colors.primary} />
+            </View>
+        );
+    };
+
+    const renderChatView = () => (
         <KeyboardAvoidingView
             style={styles.container}
             behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
-            <StatusBar style="dark" />
-
-            {/* Decorative Background Blurs */}
-            <View style={styles.blurTopRight} />
-            <View style={styles.blurLeft} />
-            <View style={styles.blurBottomRight} />
-
-            {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
                 <TouchableOpacity
                     style={styles.backButton}
-                    onPress={() => router.back()}
+                    onPress={() => setViewMode('history')}
                 >
                     <ArrowLeft size={24} color={colors.foreground} />
                 </TouchableOpacity>
 
                 <View style={styles.headerCenter}>
-                    <Text style={styles.headerLabel}>AI Assistant</Text>
-                    <Text style={styles.headerTitle}>Goodfor AI</Text>
+                    <Text style={styles.headerTitle}>AI Assistant</Text>
+                    <Text style={styles.headerSubtitle}>{selectedAge.toUpperCase()}</Text>
                 </View>
 
-                <View style={styles.aiIconContainer}>
-                    <Sparkles size={20} color={colors.primaryForeground} />
+                {/* Real User Profile Image */}
+                <View style={styles.profileContainer}>
+                    {renderAvatar()}
                 </View>
             </View>
 
-            {/* Messages */}
             <ScrollView
                 ref={scrollViewRef}
                 style={styles.scrollView}
                 contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
             >
-                {messages.length === 0 ? (
-                    /* Help Card - shown when no messages */
-                    <View style={styles.helpCard}>
-                        <View style={styles.helpIconContainer}>
-                            <Sparkles size={28} color={colors.primaryForeground} />
+                {/* Product Context Card — shown when coming from a scan */}
+                {productInfo && (
+                    <View style={styles.productContextCard}>
+                        <View style={styles.productContextHeader}>
+                            {productInfo.imageUrl ? (
+                                <Image source={{ uri: productInfo.imageUrl }} style={styles.productContextImage} />
+                            ) : (
+                                <View style={[styles.productContextImage, { backgroundColor: `${colors.primary}15`, alignItems: 'center', justifyContent: 'center' }]}>
+                                    <Package size={20} color={colors.primary} />
+                                </View>
+                            )}
+                            <View style={styles.productContextInfo}>
+                                <Text style={styles.productContextName} numberOfLines={1}>{productInfo.name}</Text>
+                                {productInfo.brand ? <Text style={styles.productContextBrand}>{productInfo.brand}</Text> : null}
+                            </View>
+                            <View style={[styles.productContextBadge, {
+                                backgroundColor: productInfo.safetyLevel === 'SAFE' ? `${colors.chart1}20` :
+                                    productInfo.safetyLevel === 'CAUTION' ? `${colors.chart2}20` : `${colors.chart3}20`
+                            }]}>
+                                <Text style={[styles.productContextScore, {
+                                    color: productInfo.safetyLevel === 'SAFE' ? colors.chart1 :
+                                        productInfo.safetyLevel === 'CAUTION' ? colors.chart2 : colors.chart3
+                                }]}>{productInfo.safetyScore}</Text>
+                            </View>
                         </View>
-                        <Text style={styles.helpTitle}>How can I help?</Text>
-                        <Text style={styles.helpDescription}>
-                            I'll analyze ingredients and nutritional data based on who the product is for.
+                    </View>
+                )}
+
+                {messages.length === 0 && !productInfo ? (
+                    <View style={styles.emptyState}>
+                        <View style={styles.emptyIconBg}>
+                            <Sparkles size={32} color={colors.primary} />
+                        </View>
+                        <Text style={styles.emptyTitle}>Ask Goodfor AI</Text>
+                        <Text style={styles.emptyDesc}>
+                            I have your recent scans, family profiles, and preferences loaded. Ask me anything!
                         </Text>
                     </View>
                 ) : (
-                    /* Chat Messages */
                     messages.map((msg, index) => (
                         <View
                             key={index}
@@ -199,24 +648,22 @@ export default function AIChat() {
                                     msg.role === "user" ? styles.userBubble : styles.assistantBubble
                                 ]}
                             >
-                                <Text
-                                    style={[
-                                        styles.messageText,
-                                        msg.role === "user" ? styles.userMessageText : styles.assistantMessageText
-                                    ]}
-                                >
-                                    {msg.content}
-                                </Text>
+                                {msg.role === "user" ? (
+                                    <Text style={[styles.messageText, styles.userMessageText]}>
+                                        {msg.content}
+                                    </Text>
+                                ) : (
+                                    <MarkdownText
+                                        style={styles.markdownContainer}
+                                        isUser={false}
+                                    >
+                                        {msg.content}
+                                    </MarkdownText>
+                                )}
                             </View>
-                            {msg.role === "user" && (
-                                <View style={styles.userAvatar}>
-                                    <UserCheck size={16} color={colors.primaryForeground} />
-                                </View>
-                            )}
                         </View>
                     ))
                 )}
-
                 {isLoading && (
                     <View style={[styles.messageContainer, styles.assistantMessageContainer]}>
                         <View style={styles.assistantAvatar}>
@@ -229,404 +676,211 @@ export default function AIChat() {
                 )}
             </ScrollView>
 
-            {/* Bottom Input Section */}
-            <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 20 }]}>
-                {/* Quick Prompts - only show when no messages */}
+            <View style={[styles.bottomSection, { paddingBottom: insets.bottom + 10 }]}>
+                {/* Quick Prompts */}
                 {messages.length === 0 && (
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.quickPromptsContainer}
+                        style={styles.chipsScroll}
+                        contentContainerStyle={styles.chipsContent}
                     >
                         {quickPrompts.map((prompt, index) => (
                             <TouchableOpacity
                                 key={index}
-                                style={styles.quickPromptButton}
-                                onPress={() => setMessage(prompt)}
+                                style={styles.chipButton}
+                                onPress={() => handleSend(prompt)}
                             >
-                                <Text style={styles.quickPromptText}>{prompt}</Text>
+                                <Text style={styles.chipText}>{prompt}</Text>
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
                 )}
 
-                {/* Age Selector */}
-                <View style={styles.ageSection}>
-                    <Text style={styles.ageSectionLabel}>Answer for:</Text>
-                    <View style={styles.ageOptionsRow}>
-                        {ageOptions.map((option) => {
-                            const Icon = option.icon;
-                            const isSelected = selectedAge === option.id;
-                            return (
-                                <TouchableOpacity
-                                    key={option.id}
-                                    style={[
-                                        styles.ageOption,
-                                        isSelected && styles.ageOptionSelected
-                                    ]}
-                                    onPress={() => setSelectedAge(option.id)}
-                                >
-                                    <Icon
-                                        size={16}
-                                        color={isSelected ? colors.primaryForeground : colors.secondaryForeground}
-                                    />
-                                    <Text style={[
-                                        styles.ageOptionText,
-                                        isSelected && styles.ageOptionTextSelected
-                                    ]}>
-                                        {option.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
+                <View style={[styles.inputBar, { flexDirection: 'column', alignItems: 'stretch', borderRadius: 24, padding: 12, gap: 12 }]}>
+                    {/* Rate Limit Indicator */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <Text style={{ fontSize: 11, fontFamily: fonts.sans.medium, color: colors.mutedForeground }}>
+                            {getLimitLabel()}
+                        </Text>
+                        <TouchableOpacity onPress={() => router.push('/subscription')}>
+                            <Text style={{ fontSize: 11, fontFamily: fonts.sans.bold, color: colors.primary }}>
+                                {profile?.subscription_tier === 'pro' ? 'PRO' : 'UPGRADE'}
+                            </Text>
+                        </TouchableOpacity>
                     </View>
-                </View>
 
-                {/* Input Field */}
-                <View style={styles.inputContainer}>
-                    <TextInput
-                        style={styles.textInput}
-                        placeholder="Ask anything about products..."
-                        placeholderTextColor={colors.mutedForeground}
-                        value={message}
-                        onChangeText={setMessage}
-                        multiline={false}
-                        editable={!isLoading}
-                        onSubmitEditing={handleSend}
-                        returnKeyType="send"
-                    />
-                    <TouchableOpacity
-                        style={[
-                            styles.sendButton,
-                            (message.length > 0 && !isLoading) && styles.sendButtonActive
-                        ]}
-                        onPress={handleSend}
-                        disabled={!message.trim() || isLoading}
-                    >
-                        {isLoading ? (
-                            <ActivityIndicator size="small" color={colors.primaryForeground} />
-                        ) : (
-                            <ArrowUp size={20} color={colors.primaryForeground} />
-                        )}
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <TouchableOpacity
+                            style={styles.ageSelector}
+                            onPress={() => {
+                                const next = { adult: 'child', child: 'toddler', toddler: 'adult' };
+                                setSelectedAge(next[selectedAge]);
+                            }}
+                        >
+                            {selectedAge === 'adult' && <User size={16} color={colors.primary} />}
+                            {selectedAge === 'child' && <UserCircle size={16} color={colors.primary} />}
+                            {selectedAge === 'toddler' && <Baby size={16} color={colors.primary} />}
+                        </TouchableOpacity>
+
+                        <TextInput
+                            style={styles.input}
+                            placeholder="Type a question..."
+                            placeholderTextColor={colors.mutedForeground}
+                            value={message}
+                            onChangeText={setMessage}
+                            onSubmitEditing={() => handleSend()}
+                        />
+
+                        <TouchableOpacity
+                            style={[styles.sendBtn, (!message.trim() || isLoading) && styles.sendBtnDisabled]}
+                            onPress={() => handleSend()}
+                            disabled={!message.trim() || isLoading}
+                        >
+                            <ArrowUp size={20} color="#fff" />
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </View>
         </KeyboardAvoidingView>
     );
+
+    const renderHistoryView = () => (
+        <View style={styles.container}>
+            <View style={styles.blurTopRight} />
+            <View style={styles.blurLeft} />
+
+            <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
+                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                    <ArrowLeft size={24} color={colors.foreground} />
+                </TouchableOpacity>
+                <Text style={styles.historyHeaderTitle}>Conversations</Text>
+
+                {/* Real User Profile Image */}
+                <View style={styles.profileContainer}>
+                    {renderAvatar()}
+                </View>
+            </View>
+
+            <FlatList
+                data={chatHistory}
+                keyExtractor={item => item.id}
+                renderItem={renderHistoryItem}
+                contentContainerStyle={styles.historyList}
+                ListHeaderComponent={
+                    <View style={styles.historyHeaderComponent}>
+                        <TouchableOpacity style={styles.startChatCard} onPress={startNewChat}>
+                            <View style={styles.startChatIcon}>
+                                <Bot size={28} color="#fff" />
+                            </View>
+                            <View>
+                                <Text style={styles.startChatTitle}>New Analysis</Text>
+                                <Text style={styles.startChatDesc}>Ask about ingredients & safety</Text>
+                            </View>
+                            <ChevronRight size={20} color={colors.mutedForeground} style={{ marginLeft: 'auto' }} />
+                        </TouchableOpacity>
+
+                        {chatHistory.length > 0 && <Text style={styles.sectionTitle}>RECENT CHATS</Text>}
+                    </View>
+                }
+                ListEmptyComponent={
+                    <View style={styles.emptyHistory}>
+                        <MessageSquare size={40} color={colors.muted} />
+                        <Text style={styles.emptyHistoryText}>No conversations yet.</Text>
+                        <Text style={styles.emptyHistorySub}>Start a new chat to track health analysis.</Text>
+                    </View>
+                }
+            />
+        </View>
+    );
+
+    return (
+        <View style={{ flex: 1, backgroundColor: colors.background }}>
+            <StatusBar style="dark" />
+            {viewMode === 'history' ? renderHistoryView() : renderChatView()}
+        </View>
+    );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.background,
-        position: "relative",
-        overflow: "hidden",
-    },
-
-    // Background Blurs
-    blurTopRight: {
-        position: "absolute",
-        top: -128,
-        right: -128,
-        width: 256,
-        height: 256,
-        backgroundColor: colors.accent,
-        borderRadius: 128,
-        opacity: 0.4,
-    },
-    blurLeft: {
-        position: "absolute",
-        top: "25%",
-        left: -96,
-        width: 192,
-        height: 192,
-        backgroundColor: colors.chart1,
-        borderRadius: 96,
-        opacity: 0.05,
-    },
-    blurBottomRight: {
-        position: "absolute",
-        bottom: "25%",
-        right: -80,
-        width: 224,
-        height: 224,
-        backgroundColor: colors.accent,
-        borderRadius: 112,
-        opacity: 0.2,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
 
     // Header
-    header: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        paddingHorizontal: 24,
-        paddingBottom: 16,
-        zIndex: 10,
-        backgroundColor: `${colors.background}CC`,
-    },
-    backButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: colors.card,
-        alignItems: "center",
-        justifyContent: "center",
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.06,
-        shadowRadius: 2,
-        elevation: 1,
-        borderWidth: 1,
-        borderColor: `${colors.border}66`,
-    },
-    headerCenter: {
-        alignItems: "center",
-    },
-    headerLabel: {
-        fontSize: 12,
-        fontFamily: fonts.sans.bold,
-        color: colors.mutedForeground,
-        textTransform: "uppercase",
-        letterSpacing: 2,
-    },
-    headerTitle: {
-        fontSize: 14,
-        fontFamily: fonts.heading.bold,
-        color: colors.primary,
-    },
-    aiIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: colors.primary,
-        alignItems: "center",
-        justifyContent: "center",
-    },
+    header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 16, backgroundColor: colors.background },
+    backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.border },
+    headerTitle: { fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground },
+    headerSubtitle: { fontSize: 10, fontFamily: fonts.sans.bold, color: colors.primary, letterSpacing: 1 },
+    headerCenter: { alignItems: 'center' },
+    historyHeaderTitle: { fontSize: 20, fontFamily: fonts.heading.bold, color: colors.foreground },
+    newChatHeaderBtn: { padding: 4 },
 
-    // Scroll View
-    scrollView: {
-        flex: 1,
-        zIndex: 10,
-    },
-    scrollContent: {
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-        flexGrow: 1,
-    },
+    profileContainer: { width: 40, alignItems: 'flex-end' },
+    headerAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.muted },
+    headerAvatarFallback: { width: 40, height: 40, borderRadius: 20, backgroundColor: `${colors.primary}15`, alignItems: 'center', justifyContent: 'center' },
 
-    // Help Card
-    helpCard: {
-        backgroundColor: `${colors.accent}4D`,
-        borderRadius: 16,
-        padding: 24,
-        alignItems: "center",
-        borderWidth: 1,
-        borderColor: colors.accent,
-        marginTop: 32,
-    },
-    helpIconContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: colors.primary,
-        alignItems: "center",
-        justifyContent: "center",
-        marginBottom: 16,
-    },
-    helpTitle: {
-        fontSize: 18,
-        fontFamily: fonts.heading.bold,
-        color: colors.foreground,
-        marginBottom: 8,
-    },
-    helpDescription: {
-        fontSize: 14,
-        fontFamily: fonts.sans.regular,
-        color: colors.mutedForeground,
-        textAlign: "center",
-        lineHeight: 22,
-    },
+    // History View
+    historyList: { padding: 20, paddingBottom: 40 },
+    historyHeaderComponent: { marginBottom: 20 },
+    startChatCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, padding: 16, borderRadius: 16, marginBottom: 24, borderWidth: 1, borderColor: `${colors.primary}30`, shadowColor: colors.primary, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
+    startChatIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginRight: 16 },
+    startChatTitle: { fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground },
+    startChatDesc: { fontSize: 13, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
+    sectionTitle: { fontSize: 12, fontFamily: fonts.sans.bold, color: colors.mutedForeground, letterSpacing: 1.5, marginBottom: 12 },
 
-    // Message Styles
-    messageContainer: {
-        flexDirection: "row",
-        marginBottom: 12,
-        alignItems: "flex-end",
-    },
-    userMessageContainer: {
-        justifyContent: "flex-end",
-    },
-    assistantMessageContainer: {
-        justifyContent: "flex-start",
-    },
-    messageBubble: {
-        maxWidth: "75%",
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        borderRadius: 20,
-    },
-    userBubble: {
-        backgroundColor: colors.primary,
-        borderBottomRightRadius: 4,
-    },
-    assistantBubble: {
-        backgroundColor: colors.card,
-        borderBottomLeftRadius: 4,
-        borderWidth: 1,
-        borderColor: `${colors.border}40`,
-    },
-    messageText: {
-        fontSize: 15,
-        fontFamily: fonts.sans.regular,
-        lineHeight: 22,
-    },
-    userMessageText: {
-        color: colors.primaryForeground,
-    },
-    assistantMessageText: {
-        color: colors.foreground,
-    },
-    assistantAvatar: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: colors.primary,
-        alignItems: "center",
-        justifyContent: "center",
-        marginRight: 8,
-    },
-    userAvatar: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: colors.accent,
-        alignItems: "center",
-        justifyContent: "center",
-        marginLeft: 8,
-    },
+    historyCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, padding: 16, borderRadius: radius.xl, marginBottom: 12, borderWidth: 1, borderColor: colors.border },
+    historyIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: `${colors.primary}10`, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+    historyInfo: { flex: 1 },
+    historyTitle: { fontSize: 14, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: 4 },
+    historyDate: { fontSize: 11, fontFamily: fonts.sans.regular, color: colors.mutedForeground },
+    deleteBtn: { padding: 8 },
+    emptyHistory: { alignItems: 'center', justifyContent: 'center', marginTop: 60, opacity: 0.6 },
+    emptyHistoryText: { marginTop: 16, fontSize: 16, fontFamily: fonts.sans.bold, color: colors.foreground },
+    emptyHistorySub: { fontSize: 13, color: colors.mutedForeground, marginTop: 4 },
 
-    // Bottom Section
-    bottomSection: {
-        backgroundColor: `${colors.background}F2`,
-        paddingTop: 16,
-        zIndex: 30,
-    },
+    // Chat View
+    scrollView: { flex: 1 },
+    scrollContent: { padding: 20 },
+    messageContainer: { flexDirection: "row", marginBottom: 16, alignItems: "flex-end" },
+    userMessageContainer: { justifyContent: "flex-end" },
+    assistantMessageContainer: { justifyContent: "flex-start" },
+    messageBubble: { maxWidth: "80%", paddingVertical: 12, paddingHorizontal: 16, borderRadius: 20 },
+    userBubble: { backgroundColor: colors.primary, borderBottomRightRadius: 4 },
+    assistantBubble: { backgroundColor: colors.card, borderBottomLeftRadius: 4, borderWidth: 1, borderColor: colors.border },
+    messageText: { fontSize: 15, fontFamily: fonts.sans.regular, lineHeight: 22 },
+    userMessageText: { color: "#fff" },
+    assistantMessageText: { color: colors.foreground },
+    markdownContainer: { flex: 1 },
+    assistantAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
 
-    // Quick Prompts
-    quickPromptsContainer: {
-        gap: 12,
-        paddingHorizontal: 24,
-        paddingBottom: 16,
-    },
-    quickPromptButton: {
-        backgroundColor: colors.accent,
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: `${colors.border}66`,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.04,
-        shadowRadius: 2,
-        elevation: 1,
-    },
-    quickPromptText: {
-        fontSize: 12,
-        fontFamily: fonts.sans.bold,
-        color: colors.accentForeground,
-    },
+    // Product Context Card
+    productContextCard: { backgroundColor: colors.card, borderRadius: 16, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: `${colors.primary}25`, shadowColor: colors.primary, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 },
+    productContextHeader: { flexDirection: 'row', alignItems: 'center' },
+    productContextImage: { width: 44, height: 44, borderRadius: 10, marginRight: 12, backgroundColor: colors.muted },
+    productContextInfo: { flex: 1 },
+    productContextName: { fontSize: 15, fontFamily: fonts.sans.bold, color: colors.foreground },
+    productContextBrand: { fontSize: 12, fontFamily: fonts.sans.regular, color: colors.mutedForeground, marginTop: 2 },
+    productContextBadge: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+    productContextScore: { fontSize: 16, fontFamily: fonts.heading.bold },
 
-    // Age Section
-    ageSection: {
-        paddingHorizontal: 24,
-        marginBottom: 8,
-    },
-    ageSectionLabel: {
-        fontSize: 10,
-        fontFamily: fonts.sans.bold,
-        color: colors.mutedForeground,
-        textTransform: "uppercase",
-        letterSpacing: 2,
-        marginBottom: 8,
-        marginLeft: 4,
-    },
-    ageOptionsRow: {
-        flexDirection: "row",
-        gap: 8,
-    },
-    ageOption: {
-        flex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        paddingVertical: 12,
-        borderRadius: 12,
-        backgroundColor: colors.secondary,
-        borderWidth: 2,
-        borderColor: "transparent",
-    },
-    ageOptionSelected: {
-        backgroundColor: colors.primary,
-        borderColor: colors.primary,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    ageOptionText: {
-        fontSize: 12,
-        fontFamily: fonts.sans.bold,
-        color: colors.secondaryForeground,
-    },
-    ageOptionTextSelected: {
-        color: colors.primaryForeground,
-    },
+    emptyState: { alignItems: 'center', marginTop: 40 },
+    emptyIconBg: { width: 64, height: 64, borderRadius: 32, backgroundColor: `${colors.primary}10`, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    emptyTitle: { fontSize: 18, fontFamily: fonts.heading.bold, color: colors.foreground, marginBottom: 8 },
+    emptyDesc: { fontSize: 14, fontFamily: fonts.sans.regular, color: colors.mutedForeground, textAlign: 'center', maxWidth: 260 },
 
-    // Input Container
-    inputContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        marginHorizontal: 24,
-        marginTop: 8,
-        backgroundColor: colors.card,
-        borderRadius: 16,
-        padding: 8,
-        borderWidth: 1,
-        borderColor: `${colors.border}80`,
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        elevation: 4,
-    },
-    textInput: {
-        flex: 1,
-        height: 40,
-        paddingHorizontal: 12,
-        fontSize: 15,
-        fontFamily: fonts.sans.regular,
-        color: colors.foreground,
-    },
-    sendButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
-        backgroundColor: colors.primary,
-        alignItems: "center",
-        justifyContent: "center",
-        opacity: 0.5,
-    },
-    sendButtonActive: {
-        opacity: 1,
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.3,
-        shadowRadius: 4,
-        elevation: 2,
-    },
+    // Bottom Input
+    bottomSection: { backgroundColor: colors.background, paddingTop: 10 },
+    chipsScroll: { maxHeight: 50, marginBottom: 12 },
+    chipsContent: { paddingHorizontal: 20, gap: 8 },
+    chipButton: { backgroundColor: colors.card, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: colors.border },
+    chipText: { fontSize: 12, fontFamily: fonts.sans.medium, color: colors.foreground },
+
+    inputBar: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 20, backgroundColor: colors.card, borderRadius: 24, padding: 8, borderWidth: 1, borderColor: colors.border, gap: 8 },
+    ageSelector: { width: 32, height: 32, borderRadius: 16, backgroundColor: `${colors.primary}15`, alignItems: 'center', justifyContent: 'center' },
+    input: { flex: 1, fontSize: 15, fontFamily: fonts.sans.regular, color: colors.foreground, maxHeight: 80, paddingHorizontal: 8 },
+    sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+    sendBtnDisabled: { backgroundColor: colors.muted, opacity: 0.5 },
+
+    // Background Accents
+    blurTopRight: { position: "absolute", top: -100, right: -100, width: 200, height: 200, backgroundColor: colors.accent, borderRadius: 100, opacity: 0.3 },
+    blurLeft: { position: "absolute", top: "30%", left: -80, width: 160, height: 160, backgroundColor: colors.chart1, borderRadius: 80, opacity: 0.05 },
 });

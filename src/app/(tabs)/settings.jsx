@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, Pressable, ScrollView, Image, StyleSheet, Switch, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Award, RefreshCw, LogOut, Database, Trash2, Palette,
   Wind, Leaf, BarChart2, Type, Info, ChevronRight
@@ -10,14 +11,56 @@ import { colors, fonts, fontSizes, spacing, radius } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { signOut } from '@/lib/supabaseAuth';
 
+const INSIGHTS_PREFS_KEY = 'goodfor_insights_prefs';
+
 export default function Settings() {
   const router = useRouter();
-  const { profile } = useAuth();
+  const { profile, activeFamilyMember } = useAuth();
 
   // State for toggles
   const [reduceMotion, setReduceMotion] = useState(false);
   const [envImpact, setEnvImpact] = useState(true);
   const [businessInsights, setBusinessInsights] = useState(false);
+  const [isPrefsLoaded, setIsPrefsLoaded] = useState(false);
+
+  // Load saved preferences on mount
+  useEffect(() => {
+    loadInsightsPrefs();
+  }, []);
+
+  // Save preferences when they change (only after initial load)
+  useEffect(() => {
+    if (isPrefsLoaded) {
+      saveInsightsPrefs();
+    }
+  }, [envImpact, businessInsights, isPrefsLoaded]);
+
+  const loadInsightsPrefs = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(INSIGHTS_PREFS_KEY);
+      console.log('[Settings] Loaded prefs:', saved);
+      if (saved) {
+        const prefs = JSON.parse(saved);
+        setEnvImpact(prefs.envImpact ?? true);
+        setBusinessInsights(prefs.businessInsights ?? false);
+      }
+      // Mark as loaded AFTER setting states
+      setIsPrefsLoaded(true);
+    } catch (e) {
+      console.error('[Settings] Error loading insights prefs:', e);
+      setIsPrefsLoaded(true);
+    }
+  };
+
+  const saveInsightsPrefs = async () => {
+    try {
+      const prefsToSave = { envImpact, businessInsights };
+      console.log('[Settings] Saving prefs:', prefsToSave);
+      await AsyncStorage.setItem(INSIGHTS_PREFS_KEY, JSON.stringify(prefsToSave));
+    } catch (e) {
+      console.error('[Settings] Error saving insights prefs:', e);
+    }
+  };
 
   const getInitials = (name) => {
     if (!name) return '?';
@@ -69,14 +112,14 @@ export default function Settings() {
           style={[styles.profilePicture, { backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }]}
           onPress={() => router.push('/edit-profile')}
         >
-          {profile?.avatar_url ? (
+          {(activeFamilyMember?.avatar_url || profile?.avatar_url) ? (
             <Image
-              source={{ uri: profile.avatar_url }}
+              source={{ uri: activeFamilyMember?.avatar_url || profile?.avatar_url }}
               style={styles.profileImage}
             />
           ) : (
             <Text style={{ fontSize: 16, fontFamily: fonts.sansBold, color: colors.primaryForeground }}>
-              {getInitials(profile?.full_name || profile?.email)}
+              {getInitials(activeFamilyMember?.name || profile?.full_name || profile?.email || '?')}
             </Text>
           )}
         </Pressable>
@@ -126,44 +169,6 @@ export default function Settings() {
           </View>
         ))}
 
-        {/* Appearance Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>APPEARANCE</Text>
-          <View style={styles.card}>
-            <Pressable style={[styles.settingItem, styles.settingItemBorder]}>
-              <View style={styles.settingItemLeft}>
-                <View style={styles.iconContainer}>
-                  <Palette size={24} color={colors.primary} />
-                </View>
-                <View>
-                  <Text style={styles.settingLabel}>App Theme</Text>
-                  <Text style={styles.settingSubtitle}>Light, Dark, or System</Text>
-                </View>
-              </View>
-              <View style={styles.settingItemRight}>
-                <Text style={styles.settingValue}>System</Text>
-                <ChevronRight size={20} color={colors.mutedForeground} />
-              </View>
-            </Pressable>
-            <View style={styles.settingItem}>
-              <View style={styles.settingItemLeft}>
-                <View style={styles.iconContainer}>
-                  <Wind size={24} color={colors.primary} />
-                </View>
-                <View>
-                  <Text style={styles.settingLabel}>Reduce Motion</Text>
-                  <Text style={styles.settingSubtitle}>Minimize animations</Text>
-                </View>
-              </View>
-              <Switch
-                value={reduceMotion}
-                onValueChange={setReduceMotion}
-                trackColor={{ false: colors.muted, true: colors.primary }}
-                thumbColor={colors.card}
-              />
-            </View>
-          </View>
-        </View>
 
         {/* Insights Preferences */}
         <View style={styles.section}>
@@ -174,7 +179,7 @@ export default function Settings() {
                 <View style={styles.iconContainer}>
                   <Leaf size={24} color={colors.primary} />
                 </View>
-                <Text style={styles.settingLabel}>Environmental impact indicators</Text>
+                <Text style={[styles.settingLabel, { flex: 1 }]} numberOfLines={2}>Environmental impact indicators</Text>
               </View>
               <Switch
                 value={envImpact}
