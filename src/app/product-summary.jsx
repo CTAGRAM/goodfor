@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, Image, Share, TouchableOpacity, Modal } from "react-native";
+import { useState, useEffect, useRef, useMemo } from "react";
+import { View, Text, StyleSheet, ScrollView, Pressable, Image, Share, TouchableOpacity, Modal, Alert } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -33,23 +33,33 @@ import {
     Box,
     MessageCircle,
     Sparkles,
-    Award
+    Award,
+    ShoppingCart,
+    X
 } from "lucide-react-native";
+import { BlurView } from 'expo-blur';
+import Animated, { FadeInDown } from "react-native-reanimated";
+import AnimatedPressable from "@/components/AnimatedPressable";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { SAFETY_LEVELS, analyzeProductSafety, yearsToMonths } from "@/lib/productSafety";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
-import NutriScoreInfo from "@/components/NutriScoreInfo";
+// NutriScoreInfo is now inlined as a tooltip modal below
 import IngredientDetailModal from "@/components/IngredientDetailModal";
 import RecallAlert from "@/components/RecallAlert";
 import { checkProductRecall } from "@/lib/recallService";
 import { isProductFavorite, addToFavorites, removeFromFavorites } from "@/lib/productService";
+import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "@/lib/haptics";
+import { ConfettiBurst } from '@/components/AnimatedEffects';
+import { getOrCreateTodayBasket, addToBasket as addProductToBasket, replaceBasketItem } from '@/lib/basketService';
+import { useAlert } from '@/contexts/AlertContext';
 
 export default function ProductSummary() {
-    const { productData } = useLocalSearchParams();
+    const { productData, replaceItemId, basketId: replaceBasketId } = useLocalSearchParams();
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { profile, user } = useAuth();
+    const { showAlert } = useAlert();
     const [isFavorite, setIsFavorite] = useState(false);
     const [showNutriScoreInfo, setShowNutriScoreInfo] = useState(false);
     const [showIngredientDetail, setShowIngredientDetail] = useState(false);
@@ -68,6 +78,7 @@ export default function ProductSummary() {
     const [productRecall, setProductRecall] = useState(null);
     const [recallDismissed, setRecallDismissed] = useState(false);
     const [productId, setProductId] = useState(null); // For favorites tracking
+    const [showSources, setShowSources] = useState(false); // V6: Sources & Methodology
 
     // Phase 4: Fetch family members
     useEffect(() => {
@@ -145,7 +156,7 @@ export default function ProductSummary() {
     const product = JSON.parse(productData || '{}');
 
     // Ensure safety analysis exists with defaults (handles both fresh and history data)
-    const safety = product.safetyAnalysis || {
+    const originalSafety = product.safetyAnalysis || {
         safety: SAFETY_LEVELS.SAFE,
         safeScore: 50,
         issues: [],
@@ -153,8 +164,34 @@ export default function ProductSummary() {
         nutriScore: null,
     };
 
-    // Determine if this is a beauty/cosmetic product
-    const isBeautyProduct = product.productType === 'BEAUTY' || safety.productType === 'BEAUTY';
+    // Re-analyze safety when profile changes (Client request: score should update per person)
+    const safety = useMemo(() => {
+        if (!selectedMember || selectedMember === 'FAMILY_OVERVIEW') {
+            return originalSafety; // Use original analysis for main profile
+        }
+        try {
+            const memberAgeYears = selectedMember.age_years ||
+                (selectedMember.age_group === 'infant' ? 1 : selectedMember.age_group === 'child' ? 8 : 30);
+            const memberAgeMonths = yearsToMonths(memberAgeYears);
+            const memberPrefs = {
+                allergies: selectedMember.allergies || [],
+                dietaryRestrictions: selectedMember.dietary_restrictions || [],
+                healthConditions: selectedMember.health_conditions || [],
+            };
+            return analyzeProductSafety(product, memberAgeMonths, memberPrefs);
+        } catch (e) {
+            console.error('[ProductSummary] Re-analysis error:', e);
+            return originalSafety;
+        }
+    }, [selectedMember, product.barcode]);
+
+    // Determine if this is a beauty/cosmetic product — broad detection
+    const BEAUTY_KEYWORDS = /beauty|cosmetic|shampoo|soap|skin\s?care|skincare|hair\s?care|haircare|lotion|cream|face|body\s?wash|hygiene|moisturi[sz]|serum|cleanser|conditioner|sunscreen|spf|makeup|mascara|lipstick|foundation|perfume|fragrance|deodorant|toothpaste|dental|mouthwash|exfoliat|toner|scrub/i;
+    const isBeautyProduct = product.productType === 'BEAUTY' || safety.productType === 'BEAUTY' ||
+        (typeof product.category === 'string' && product.category.toLowerCase().includes('beauty')) ||
+        (product.categories_tags || []).some(t => BEAUTY_KEYWORDS.test(t)) ||
+        BEAUTY_KEYWORDS.test(product.product_name || product.name || '') ||
+        BEAUTY_KEYWORDS.test((product.categories || []).join(' '));
 
     // Ensure required objects exist for UI calculations
     if (!product.nutriments) product.nutriments = {};
@@ -169,7 +206,9 @@ export default function ProductSummary() {
         'biscuits': 30, 'cookies': 30, 'wafers': 30,
         'chocolate': 25, 'confectionery': 25, 'candy': 25, 'sweets': 25,
         'sauces': 15, 'ketchup': 15, 'mayonnaise': 15, 'dressing': 15, 'condiments': 15,
-        'spreads': 20, 'jam': 20, 'honey': 20, 'peanut butter': 20, 'butter': 10,
+        'almond butter': 15, 'peanut butter': 15, 'nut butter': 15, 'cashew butter': 15,
+        'spreads': 20, 'jam': 20, 'honey': 20, 'nutella': 15, 'tahini': 15,
+        'butter': 10, 'margarine': 10,
         'beverages': 250, 'drinks': 250, 'juice': 200, 'soda': 330, 'water': 250,
         'milk': 200, 'yogurt': 125, 'yoghurt': 125,
         'cereal': 40, 'muesli': 50, 'oats': 40, 'granola': 45,
@@ -193,20 +232,32 @@ export default function ProductSummary() {
         return 30; // Generic fallback: 30g is a common snack portion
     };
 
+    // V5: Detect if product is a drink/beverage
+    const isDrink = (() => {
+        const cats = (product.categories || []).join(' ').toLowerCase();
+        const name = (product.product_name || product.name || '').toLowerCase();
+        const text = `${cats} ${name}`;
+        return ['beverage', 'drink', 'juice', 'soda', 'water', 'milk', 'coffee', 'tea', 'energy drink', 'smoothie', 'lemonade', 'cola'].some(k => text.includes(k));
+    })();
+    const portionUnit = isDrink ? 'ml' : 'g';
+
     const getServingSize = () => {
         const servingSize = product.serving_size || product.servingSize;
         if (servingSize) {
-            // Parse serving size string like "30g" or "1 cup (240ml)"
-            const match = servingSize.match(/(\d+(?:\.\d+)?)\s*g/i);
-            if (match) return { size: parseFloat(match[1]), isDefault: false };
+            // V5: Parse both g and ml from serving strings like "30g" or "330ml" or "1 cup (240ml)"
+            const matchG = servingSize.match(/(\d+(?:\.\d+)?)\s*g/i);
+            if (matchG) return { size: parseFloat(matchG[1]), isDefault: false, unit: 'g' };
+            const matchMl = servingSize.match(/(\d+(?:\.\d+)?)\s*ml/i);
+            if (matchMl) return { size: parseFloat(matchMl[1]), isDefault: false, unit: 'ml' };
         }
         // Use category-based default
-        return { size: getDefaultPortionSize(), isDefault: true };
+        return { size: getDefaultPortionSize(), isDefault: true, unit: portionUnit };
     };
 
     const servingSizeData = getServingSize();
     const servingSize = servingSizeData.size;
     const isDefaultServing = servingSizeData.isDefault;
+    const servingUnit = servingSizeData.unit || portionUnit;
     // Show portion toggle for ALL food products (User requested fix for 100g bias)
     const hasServingSize = !isBeautyProduct;
 
@@ -217,14 +268,15 @@ export default function ProductSummary() {
     };
 
     // Get display label for current portion mode
+    const baseUnit = isDrink ? '100ml' : '100g';
     const portionLabel = showPerServing && servingSize
-        ? `per ${servingSize}g serving`
-        : 'per 100g';
+        ? `per ${servingSize}${servingUnit} serving`
+        : `per ${baseUnit}`;
 
     const getSafetyConfig = () => {
         switch (safety.safety) {
             case SAFETY_LEVELS.SAFE:
-                return { color: colors.chart1, icon: CheckCircle, label: 'Safe', description: 'Matches all family health preferences' };
+                return { color: colors.chart1, icon: CheckCircle, label: 'Good', description: 'Matches all family health preferences' };
             case SAFETY_LEVELS.CAUTION:
                 return { color: colors.chart2, icon: AlertCircle, label: 'Caution', description: 'Some concerns to be aware of' };
             case SAFETY_LEVELS.AVOID:
@@ -232,7 +284,7 @@ export default function ProductSummary() {
             case SAFETY_LEVELS.CRITICAL:
                 return { color: colors.destructive, icon: ShieldAlert, label: 'Unsafe', description: 'Serious health risks detected' };
             default:
-                return { color: colors.chart1, icon: CheckCircle, label: 'Safe', description: 'Safe to consume' };
+                return { color: colors.chart1, icon: CheckCircle, label: 'Good', description: 'Good to consume' };
         }
     };
 
@@ -323,18 +375,27 @@ export default function ProductSummary() {
     };
     const novaDisplay = getNovaDisplay();
 
-    // Consumption frequency guidance based on Nutri-Score and NOVA
+    // Consumption frequency guidance — anchored to safety level to prevent contradictions
     const getConsumptionGuidance = () => {
         if (isBeautyProduct) return null;
 
+        const safetyLevel = safety.safety;
         const nutriGrade = safety.nutriScore?.grade?.toUpperCase() || nutriScoreInfo.grade;
         const novaGroup = safety.novaGroup?.group || product.novaGroup;
 
+        // Safety level is the primary anchor — NEVER contradict the verdict
+        if (safetyLevel === SAFETY_LEVELS.AVOID || safetyLevel === SAFETY_LEVELS.CRITICAL) {
+            return { text: 'Not recommended for your profile', color: colors.chart3 };
+        }
+        if (safetyLevel === SAFETY_LEVELS.CAUTION || novaGroup >= 4) {
+            return { text: 'Best as an occasional treat', color: colors.chart2 };
+        }
+        // Only SAFE products get positive guidance
         if (nutriGrade === 'A' || nutriGrade === 'B') {
             return { text: 'Suitable for regular consumption', color: colors.chart1 };
         } else if (nutriGrade === 'C') {
             return { text: 'Moderate consumption recommended', color: colors.chart2 };
-        } else if (nutriGrade === 'D' || nutriGrade === 'E' || novaGroup === 4) {
+        } else if (nutriGrade === 'D' || nutriGrade === 'E') {
             return { text: 'Occasional consumption only', color: colors.chart3 };
         }
         return null;
@@ -580,6 +641,86 @@ export default function ProductSummary() {
     };
     const plainVerdict = getPlainEnglishVerdict();
 
+    // V5: Nutri-Score Explanation - "Why D?" under the Nutri-Score badge
+    const getNutriScoreExplanation = () => {
+        if (isBeautyProduct || !safety.nutriScore) return null;
+        const grade = (safety.nutriScore.grade || '').toUpperCase();
+        if (!grade) return null;
+
+        const breakdown = safety.nutriScore.breakdown;
+        if (!breakdown) return null;
+
+        // Identify worst negatives and best positives
+        const negatives = [];
+        const positives = [];
+
+        if (breakdown.negatives) {
+            if (breakdown.negatives.energy?.points >= 5) negatives.push('energy density');
+            if (breakdown.negatives.sugars?.points >= 4) negatives.push('sugar content');
+            if (breakdown.negatives.saturates?.points >= 4) negatives.push('saturated fat');
+            if (breakdown.negatives.sodium?.points >= 4) negatives.push('sodium');
+        }
+        if (breakdown.positives) {
+            if (breakdown.positives.fiber?.points >= 3) positives.push('fiber');
+            if (breakdown.positives.protein?.points >= 3) positives.push('protein');
+            if (breakdown.positives.fruitsVegetables?.points >= 3) positives.push('fruits & vegetables');
+        }
+
+        if (grade === 'A') return `Excellent balance of nutrients with low negatives.`;
+        if (grade === 'B') return `Good nutritional profile${positives.length > 0 ? ` — strong in ${positives.join(' and ')}` : ''}.`;
+
+        const negStr = negatives.length > 0 ? negatives.slice(0, 2).join(' and ') : 'nutritional imbalances';
+        const posStr = positives.length > 0 ? positives.join(' and ') : 'some positive components';
+
+        if (grade === 'C') return `${negStr.charAt(0).toUpperCase() + negStr.slice(1)} slightly offset by ${posStr}.`;
+        if (grade === 'D' || grade === 'E') return `High ${negStr} outweigh ${posStr}.`;
+
+        return null;
+    };
+    const nutriScoreExplanation = getNutriScoreExplanation();
+
+    // V5: "Why Not 100?" — Score blockers for beauty products
+    const getWhyNotPerfect = () => {
+        const score = Math.round(safety.safeScore || 50);
+        if (score >= 95) return []; // Near-perfect, skip
+
+        const blockers = [];
+
+        if (isBeautyProduct) {
+            if (safety.fragranceAllergenCount > 0) {
+                blockers.push(`Contains ${safety.fragranceAllergenCount} EU-regulated fragrance allergen(s)`);
+            }
+            if (safety.issues?.length > 0) {
+                const uniqueIssues = [...new Set(safety.issues.map(i => i.title))].slice(0, 2);
+                uniqueIssues.forEach(issue => blockers.push(issue));
+            }
+            if ((safety.clinicalEvidence || 0) < 10) {
+                blockers.push('Limited long-term clinical data for some ingredients');
+            }
+            if (safety.hasParabens) blockers.push('Contains parabens (preservative)');
+            if (safety.hasSulfates) blockers.push('Contains sulfates (surfactant)');
+        } else {
+            // Food products
+            const novaGroup = safety.novaGroup?.group || product.novaGroup;
+            if (novaGroup >= 4) blockers.push('Ultra-processed food (NOVA 4)');
+            if (safety.nutriScore?.breakdown?.negatives?.sodium?.points >= 5) {
+                blockers.push('High sodium content');
+            }
+            if (safety.nutriScore?.breakdown?.negatives?.sugars?.points >= 5) {
+                blockers.push('High sugar content');
+            }
+            if (safety.nutriScore?.breakdown?.negatives?.saturates?.points >= 5) {
+                blockers.push('High saturated fat');
+            }
+            if (safety.issues?.length > 0) {
+                const topIssue = safety.issues[0]?.title;
+                if (topIssue && !blockers.includes(topIssue)) blockers.push(topIssue);
+            }
+        }
+
+        return blockers.slice(0, 4); // Max 4 blockers
+    };
+    const scoreBlockers = getWhyNotPerfect();
     // Phase 4: "Who should limit this" Advice
     const getLimitationAdvice = () => {
         if (isBeautyProduct) return [];
@@ -660,13 +801,21 @@ export default function ProductSummary() {
 
             {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-                <Pressable style={styles.headerButton} onPress={() => router.back()}>
-                    <ArrowLeft size={24} color={colors.foreground} />
-                </Pressable>
+                <View style={styles.headerButtonShadow}>
+                    <Pressable style={styles.headerButton} onPress={() => { hapticLight(); router.back(); }}>
+                        <BlurView intensity={80} tint="extraLight" style={styles.blurContainer}>
+                            <ArrowLeft size={24} color={colors.foreground} />
+                        </BlurView>
+                    </Pressable>
+                </View>
                 <Text style={styles.headerTitle}>Analysis Result</Text>
-                <Pressable style={styles.headerButton} onPress={handleShare}>
-                    <Share2 size={20} color={colors.foreground} />
-                </Pressable>
+                <View style={styles.headerButtonShadow}>
+                    <Pressable style={styles.headerButton} onPress={() => { hapticLight(); handleShare(); }}>
+                        <BlurView intensity={80} tint="extraLight" style={styles.blurContainer}>
+                            <Share2 size={20} color={colors.foreground} />
+                        </BlurView>
+                    </Pressable>
+                </View>
             </View>
 
             <ScrollView
@@ -682,8 +831,47 @@ export default function ProductSummary() {
                     />
                 )}
 
+                {/* Phase 4: Profile Switcher (Moved to top) */}
+                {profile && (
+                    <Pressable
+                        style={styles.profileSwitcher}
+                        onPress={() => setShowProfilePicker(true)}
+                    >
+                        <View style={styles.profileSwitcherLeft}>
+                            <View style={[styles.avatar, { backgroundColor: selectedMember === 'FAMILY_OVERVIEW' ? colors.chart1 : selectedMember ? colors.accent : colors.primary }]}>
+                                {selectedMember === 'FAMILY_OVERVIEW' ? (
+                                    <Users size={18} color={colors.primaryForeground} />
+                                ) : (
+                                    <Text style={styles.avatarText}>
+                                        {viewingProfile.name?.[0] || '?'}
+                                    </Text>
+                                )}
+                            </View>
+                            <View>
+                                <Text style={styles.profileSwitcherLabel}>Viewing safety for:</Text>
+                                <Text style={styles.profileSwitcherName}>
+                                    {selectedMember === 'FAMILY_OVERVIEW' ? 'Family Overview' : viewingProfile.name}
+                                    {selectedMember !== 'FAMILY_OVERVIEW' && (
+                                        <Text style={styles.profileSwitcherAge}>
+                                            {' '}({viewingProfile.age_group === 'infant' ? 'Infant' : viewingProfile.age_group === 'child' ? 'Child' : 'Adult'})
+                                        </Text>
+                                    )}
+                                </Text>
+                            </View>
+                        </View>
+                        {familyMembers.length > 0 && (
+                            <View style={styles.switcherChevron}>
+                                <ChevronDown size={20} color={colors.mutedForeground} />
+                            </View>
+                        )}
+                    </Pressable>
+                )}
+
+                {/* V5: Spacer between profile selector and analysis */}
+                <View style={{ height: 12 }} />
+
                 {/* Main Card */}
-                <View style={styles.mainCard}>
+                <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.mainCard}>
                     {/* Product Info */}
                     <View style={styles.productRow}>
                         <View style={styles.productInfo}>
@@ -698,6 +886,38 @@ export default function ProductSummary() {
                             </View>
                         )}
                     </View>
+
+                    {/* Score Badges - Moved to top per client request */}
+                    <View style={[styles.badgeRow, { justifyContent: 'center', marginBottom: 16, marginTop: 12 }]}>
+                        {!isBeautyProduct && nutriScoreInfo.grade && (
+                            <TouchableOpacity
+                                style={[styles.nutriBadge, { backgroundColor: `${nutriScoreInfo.color}15`, borderColor: nutriScoreInfo.color }]}
+                                onPress={() => { hapticMedium(); setShowNutriScoreInfo(true); }}
+                                activeOpacity={0.7}
+                            >
+                                <Text style={[styles.nutriGrade, { color: nutriScoreInfo.color }]}>{nutriScoreInfo.grade}</Text>
+                                <Text style={styles.nutriLabel}>Nutri-Score</Text>
+                                <Info size={14} color={nutriScoreInfo.color} style={{ marginLeft: 4 }} />
+                            </TouchableOpacity>
+                        )}
+                        {isBeautyProduct && beautySafety && (
+                            <View style={[styles.nutriBadge, { backgroundColor: `${safetyConfig.color}15`, borderColor: safetyConfig.color }]}>
+                                <Text style={[styles.nutriGrade, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}</Text>
+                                <Text style={styles.nutriLabel}>Safety</Text>
+                            </View>
+                        )}
+                        <View style={[styles.scoreBadge, { backgroundColor: `${safetyConfig.color}15`, borderColor: safetyConfig.color }]}>
+                            <Text style={[styles.scoreValue, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}</Text>
+                            <Text style={styles.scoreLabel}>/100</Text>
+                        </View>
+                    </View>
+
+                    {/* Confetti celebration for high scores */}
+                    {Math.round(safety.safeScore || 0) >= 85 && (
+                        <View style={{ position: 'absolute', top: 20, alignSelf: 'center', zIndex: 10, pointerEvents: 'none' }}>
+                            <ConfettiBurst size={260} />
+                        </View>
+                    )}
 
                     {/* Safety Status */}
                     <Pressable
@@ -724,31 +944,45 @@ export default function ProductSummary() {
                         </View>
                     </View>
 
+                    {/* V5: "Why not 100?" - Score blockers */}
+                    {scoreBlockers.length > 0 && (
+                        <View style={[styles.verdictCard, { backgroundColor: `${colors.chart2}08`, borderColor: `${colors.chart2}20`, flexDirection: 'column', alignItems: 'flex-start' }]}>
+                            <Text style={{ fontSize: 13, fontFamily: fonts.sansSemiBold, color: colors.foreground, marginBottom: 8 }}>
+                                Why not a perfect score?
+                            </Text>
+                            {scoreBlockers.map((blocker, i) => (
+                                <View key={i} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 4, gap: 6, width: '100%' }}>
+                                    <Text style={{ fontSize: 12, color: colors.chart2, marginTop: 1 }}>•</Text>
+                                    <Text style={{ fontSize: 12.5, color: colors.mutedForeground, fontFamily: fonts.sans, flex: 1, lineHeight: 17 }}>{blocker}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    )}
+
+                    {/* V5: Portion Toggle — ABOVE Nutri-Score per client request */}
+                    {hasServingSize && (
+                        <View style={[styles.portionToggleContainer, { marginTop: 12 }]}>
+                            <Pressable
+                                style={[styles.portionToggleOption, !showPerServing && styles.portionToggleActive]}
+                                onPress={() => { hapticLight(); setShowPerServing(false); }}
+                            >
+                                <Text style={[styles.portionToggleText, !showPerServing && styles.portionToggleTextActive]}>
+                                    Per {baseUnit}
+                                </Text>
+                            </Pressable>
+                            <Pressable
+                                style={[styles.portionToggleOption, showPerServing && styles.portionToggleActive]}
+                                onPress={() => { hapticLight(); setShowPerServing(true); }}
+                            >
+                                <Text style={[styles.portionToggleText, showPerServing && styles.portionToggleTextActive]}>
+                                    {isDefaultServing ? `~ ${servingSize}${servingUnit} typical` : `Per Serving (${servingSize}${servingUnit})`}
+                                </Text>
+                            </Pressable>
+                        </View>
+                    )}
+
                     {/* Environmental Badge + Analysis Button */}
                     <View style={styles.bottomSection}>
-                        <View style={styles.badgeRow}>
-                            {!isBeautyProduct && nutriScoreInfo.grade && (
-                                <TouchableOpacity
-                                    style={[styles.nutriBadge, { backgroundColor: `${nutriScoreInfo.color}15`, borderColor: nutriScoreInfo.color }]}
-                                    onPress={() => setShowNutriScoreInfo(true)}
-                                    activeOpacity={0.7}
-                                >
-                                    <Text style={[styles.nutriGrade, { color: nutriScoreInfo.color }]}>{nutriScoreInfo.grade}</Text>
-                                    <Text style={styles.nutriLabel}>Nutri-Score</Text>
-                                    <Info size={14} color={nutriScoreInfo.color} style={{ marginLeft: 4 }} />
-                                </TouchableOpacity>
-                            )}
-                            {isBeautyProduct && beautySafety && (
-                                <View style={[styles.nutriBadge, { backgroundColor: `${safetyConfig.color}15`, borderColor: safetyConfig.color }]}>
-                                    <Text style={[styles.nutriGrade, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}</Text>
-                                    <Text style={styles.nutriLabel}>Safety</Text>
-                                </View>
-                            )}
-                            <View style={[styles.scoreBadge, { backgroundColor: `${safetyConfig.color}15`, borderColor: safetyConfig.color }]}>
-                                <Text style={[styles.scoreValue, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}</Text>
-                                <Text style={styles.scoreLabel}>/100</Text>
-                            </View>
-                        </View>
                         <View style={styles.envBadge}>
                             <Leaf size={14} color={colors.mutedForeground} />
                             <Text style={styles.envBadgeText}>Environmental info available</Text>
@@ -782,7 +1016,7 @@ export default function ProductSummary() {
                         {novaDisplay && (
                             <Pressable
                                 style={[styles.novaBadge, { backgroundColor: `${novaDisplay.color}15`, borderColor: novaDisplay.color }]}
-                                onPress={() => setShowNovaTooltip(true)}
+                                onPress={() => { hapticMedium(); setShowNovaTooltip(true); }}
                             >
                                 {novaDisplay.icon === 'apple' && <Apple size={18} color={novaDisplay.color} />}
                                 {novaDisplay.icon === 'chef' && <ChefHat size={18} color={novaDisplay.color} />}
@@ -804,27 +1038,7 @@ export default function ProductSummary() {
                             </View>
                         )}
 
-                        {/* Phase 4: Portion Toggle */}
-                        {hasServingSize && (
-                            <View style={styles.portionToggleContainer}>
-                                <Pressable
-                                    style={[styles.portionToggleOption, !showPerServing && styles.portionToggleActive]}
-                                    onPress={() => setShowPerServing(false)}
-                                >
-                                    <Text style={[styles.portionToggleText, !showPerServing && styles.portionToggleTextActive]}>
-                                        Per 100g
-                                    </Text>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.portionToggleOption, showPerServing && styles.portionToggleActive]}
-                                    onPress={() => setShowPerServing(true)}
-                                >
-                                    <Text style={[styles.portionToggleText, showPerServing && styles.portionToggleTextActive]}>
-                                        {isDefaultServing ? `~ ${servingSize}g typical` : `Per Serving (${servingSize}g)`}
-                                    </Text>
-                                </Pressable>
-                            </View>
-                        )}
+
 
                         {/* Fat Quality Breakdown - Phase 3 */}
                         {fatQuality && (
@@ -833,7 +1047,7 @@ export default function ProductSummary() {
                                     <Leaf size={20} color={colors.chart1} />
                                     <View style={styles.fatQualityInfo}>
                                         <Text style={[styles.fatQualityLabel, { color: fatQuality.color }]}>{fatQuality.label}</Text>
-                                        <Text style={styles.fatQualityTotal}>{fatQuality.totalFat}g total fat per 100g</Text>
+                                        <Text style={styles.fatQualityTotal}>{showPerServing && servingSize ? `${getPortionValue(fatQuality.totalFat).toFixed(1)}g total fat ${portionLabel}` : `${fatQuality.totalFat}g total fat per 100g`}</Text>
                                     </View>
                                 </View>
                                 <View style={styles.fatQualityBar}>
@@ -845,20 +1059,20 @@ export default function ProductSummary() {
                                 </View>
                                 <View style={styles.fatQualityLegend}>
                                     <Text style={styles.fatQualityLegendItem}>
-                                        <Text style={{ color: colors.chart1 }}>●</Text> Unsaturated {fatQuality.unsaturatedFat}g
+                                        <Text style={{ color: colors.chart1 }}>●</Text> Unsaturated {getPortionValue(fatQuality.unsaturatedFat).toFixed(1)}g {portionLabel}
                                     </Text>
                                     <Text style={styles.fatQualityLegendItem}>
-                                        <Text style={{ color: colors.chart2 }}>●</Text> Saturated {fatQuality.saturatedFat}g
+                                        <Text style={{ color: colors.chart2 }}>●</Text> Saturated {getPortionValue(fatQuality.saturatedFat).toFixed(1)}g {portionLabel}
                                     </Text>
                                 </View>
                             </View>
                         )}
                     </View>
-                </View>
+                </Animated.View>
 
                 {/* Phase 4: Environmental Impact */}
                 {envImpact && (
-                    <View style={styles.envImpactCard}>
+                    <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.envImpactCard}>
                         <View style={styles.envImpactHeader}>
                             <Globe size={20} color={colors.chart1} />
                             <Text style={styles.envImpactTitle}>Environmental Impact</Text>
@@ -960,48 +1174,14 @@ export default function ProductSummary() {
                                 )}
                             </View>
                         )}
-                    </View>
+                    </Animated.View>
                 )}
 
-                {/* Phase 4: Profile Switcher */}
-                {profile && (
-                    <Pressable
-                        style={styles.profileSwitcher}
-                        onPress={() => setShowProfilePicker(true)}
-                    >
-                        <View style={styles.profileSwitcherLeft}>
-                            <View style={[styles.avatar, { backgroundColor: selectedMember === 'FAMILY_OVERVIEW' ? colors.chart1 : selectedMember ? colors.accent : colors.primary }]}>
-                                {selectedMember === 'FAMILY_OVERVIEW' ? (
-                                    <Users size={18} color={colors.primaryForeground} />
-                                ) : (
-                                    <Text style={styles.avatarText}>
-                                        {viewingProfile.name?.[0] || '?'}
-                                    </Text>
-                                )}
-                            </View>
-                            <View>
-                                <Text style={styles.profileSwitcherLabel}>Viewing safety for:</Text>
-                                <Text style={styles.profileSwitcherName}>
-                                    {selectedMember === 'FAMILY_OVERVIEW' ? 'Family Overview' : viewingProfile.name}
-                                    {selectedMember !== 'FAMILY_OVERVIEW' && (
-                                        <Text style={styles.profileSwitcherAge}>
-                                            {' '}({viewingProfile.age_group === 'infant' ? 'Infant' : viewingProfile.age_group === 'child' ? 'Child' : 'Adult'})
-                                        </Text>
-                                    )}
-                                </Text>
-                            </View>
-                        </View>
-                        {familyMembers.length > 0 && (
-                            <View style={styles.switcherChevron}>
-                                <ChevronDown size={20} color={colors.mutedForeground} />
-                            </View>
-                        )}
-                    </Pressable>
-                )}
+
 
                 {/* V4: Family Overview Card */}
                 {selectedMember === 'FAMILY_OVERVIEW' && familyMembers.length > 0 && (
-                    <View style={styles.familyOverviewCard}>
+                    <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.familyOverviewCard}>
                         <View style={styles.familyOverviewHeader}>
                             <Users size={18} color={colors.chart1} />
                             <Text style={styles.familyOverviewTitle}>Family Safety Summary</Text>
@@ -1041,11 +1221,11 @@ export default function ProductSummary() {
                                 </View>
                             );
                         })}
-                    </View>
+                    </Animated.View>
                 )}
 
                 {/* Ingredient Breakdown */}
-                <View style={styles.section}>
+                <Animated.View entering={FadeInDown.delay(400).duration(400)} style={styles.section}>
                     <Text style={styles.sectionTitle}>INGREDIENT BREAKDOWN</Text>
                     {ingredientBreakdown.map((item, index) => {
                         const Icon = item.icon;
@@ -1070,24 +1250,36 @@ export default function ProductSummary() {
                     })}
 
                     {/* Full Ingredients List */}
-                    {product.ingredientsText && (
-                        <View style={styles.ingredientsListCard}>
-                            <Text style={styles.ingredientsListTitle}>Complete Ingredients</Text>
-                            <Text style={styles.ingredientsListText}>{product.ingredientsText}</Text>
-                        </View>
-                    )}
+                    {(product.ingredientsText || product.ingredients) && (() => {
+                        const ingredientsText = product.ingredientsText || 
+                            (Array.isArray(product.ingredients) ? product.ingredients.map(i => i.text || i.id || i).join(', ') : product.ingredients);
+                        if (!ingredientsText || ingredientsText.trim() === '') return null;
+                        
+                        return (
+                            <View style={styles.ingredientsListCard}>
+                                <Text style={styles.ingredientsListTitle}>Complete Ingredients</Text>
+                                <Text style={styles.ingredientsListText}>{ingredientsText}</Text>
+                            </View>
+                        );
+                    })()}
 
                     {/* AI Ingredient Summary */}
-                    {product.ingredientsText && (
-                        <View style={styles.aiSummaryCard}>
-                            <Text style={styles.aiSummaryTitle}>AI Ingredient Analysis</Text>
-                            <Text style={styles.aiSummaryText}>
-                                {product.ingredientsText.split(',').length} ingredients detected.
-                                {safety.issues?.length > 0 ? ` ${safety.issues.length} concern(s): ${safety.issues.map(i => i.title).join(', ')}.` : ' No major concerns.'}
-                                {product.allergens?.length > 0 ? ` Contains: ${product.allergens.join(', ')}.` : ''}
-                            </Text>
-                        </View>
-                    )}
+                    {(product.ingredientsText || product.ingredients) && (() => {
+                        const ingredientsText = product.ingredientsText || 
+                            (Array.isArray(product.ingredients) ? product.ingredients.map(i => i.text || i.id || i).join(', ') : product.ingredients);
+                        if (!ingredientsText || ingredientsText.trim() === '') return null;
+                        
+                        return (
+                            <View style={styles.aiSummaryCard}>
+                                <Text style={styles.aiSummaryTitle}>AI Ingredient Analysis</Text>
+                                <Text style={styles.aiSummaryText}>
+                                    {ingredientsText.split(',').length} ingredients detected.
+                                    {safety.issues?.length > 0 ? ` ${safety.issues.length} concern(s): ${safety.issues.map(i => i.title).join(', ')}.` : ' No major concerns.'}
+                                    {product.allergens?.length > 0 ? ` Contains: ${product.allergens.map(a => a.replace(/^[a-z]{2}:/, '').replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())).join(', ')}.` : ''}
+                                </Text>
+                            </View>
+                        );
+                    })()}
 
                     {/* Nutri-Score Breakdown - FOOD ONLY */}
                     {!isBeautyProduct && safety.nutriScore && (
@@ -1098,6 +1290,13 @@ export default function ProductSummary() {
                                     <Text style={styles.nutriScoreGradeText}>{safety.nutriScore.grade}</Text>
                                 </View>
                             </View>
+
+                            {/* V5: "Why [grade]?" explanation */}
+                            {nutriScoreExplanation && (
+                                <Text style={{ fontSize: 12.5, color: colors.mutedForeground, fontFamily: fonts.sans, marginTop: 4, marginBottom: 8, lineHeight: 17 }}>
+                                    Why {safety.nutriScore.grade}? {nutriScoreExplanation}
+                                </Text>
+                            )}
 
                             {/* Positives */}
                             <View style={styles.nutriScoreSection}>
@@ -1116,8 +1315,9 @@ export default function ProductSummary() {
                                         <View style={styles.nutriScoreRow}>
                                             <Text style={styles.nutriScoreLabel}>Fiber</Text>
                                             <Text style={styles.nutriScoreValue}>
-                                                {safety.nutriScore.breakdown.positives.fiber.value.toFixed(1)}g
+                                                {getPortionValue(safety.nutriScore.breakdown.positives.fiber.value).toFixed(1)}g
                                             </Text>
+                                            <Text style={styles.nutriScoreUnit}>{portionLabel}</Text>
                                             <View style={styles.nutriScorePoints}>
                                                 <Text style={styles.nutriScorePointsText}>+{safety.nutriScore.breakdown.positives.fiber.points}</Text>
                                             </View>
@@ -1125,8 +1325,9 @@ export default function ProductSummary() {
                                         <View style={styles.nutriScoreRow}>
                                             <Text style={styles.nutriScoreLabel}>Protein</Text>
                                             <Text style={styles.nutriScoreValue}>
-                                                {safety.nutriScore.breakdown.positives.protein.value.toFixed(1)}g
+                                                {getPortionValue(safety.nutriScore.breakdown.positives.protein.value).toFixed(1)}g
                                             </Text>
+                                            <Text style={styles.nutriScoreUnit}>{portionLabel}</Text>
                                             <View style={styles.nutriScorePoints}>
                                                 <Text style={styles.nutriScorePointsText}>+{safety.nutriScore.breakdown.positives.protein.points}</Text>
                                             </View>
@@ -1143,8 +1344,9 @@ export default function ProductSummary() {
                                         <View style={styles.nutriScoreRow}>
                                             <Text style={styles.nutriScoreLabel}>Energy</Text>
                                             <Text style={styles.nutriScoreValue}>
-                                                {safety.nutriScore.breakdown.negatives.energy.value}kcal
+                                                {Math.round(getPortionValue(safety.nutriScore.breakdown.negatives.energy.value))}kcal
                                             </Text>
+                                            <Text style={styles.nutriScoreUnit}>{portionLabel}</Text>
                                             <View style={[styles.nutriScorePoints, styles.nutriScorePointsNegative]}>
                                                 <Text style={styles.nutriScorePointsText}>-{safety.nutriScore.breakdown.negatives.energy.points}</Text>
                                             </View>
@@ -1153,13 +1355,14 @@ export default function ProductSummary() {
                                             <Text style={styles.nutriScoreLabel}>Sugar</Text>
                                             <View style={styles.nutriScoreBar}>
                                                 <View style={[styles.nutriScoreBarFill, {
-                                                    width: `${Math.min(100, (safety.nutriScore.breakdown.negatives.sugars.value / 45) * 100)}%`,
+                                                    width: `${Math.min(100, (getPortionValue(safety.nutriScore.breakdown.negatives.sugars.value) / (showPerServing && servingSize ? 45 * servingSize / 100 : 45)) * 100)}%`,
                                                     backgroundColor: safety.nutriScore.breakdown.negatives.sugars.points > 5 ? colors.destructive : colors.chart2
                                                 }]} />
                                             </View>
                                             <Text style={styles.nutriScoreValue}>
-                                                {safety.nutriScore.breakdown.negatives.sugars.value.toFixed(1)}g
+                                                {getPortionValue(safety.nutriScore.breakdown.negatives.sugars.value).toFixed(1)}g
                                             </Text>
+                                            <Text style={styles.nutriScoreUnit}>{portionLabel}</Text>
                                             <View style={[styles.nutriScorePoints, styles.nutriScorePointsNegative]}>
                                                 <Text style={styles.nutriScorePointsText}>-{safety.nutriScore.breakdown.negatives.sugars.points}</Text>
                                             </View>
@@ -1167,8 +1370,9 @@ export default function ProductSummary() {
                                         <View style={styles.nutriScoreRow}>
                                             <Text style={styles.nutriScoreLabel}>Saturated Fat</Text>
                                             <Text style={styles.nutriScoreValue}>
-                                                {safety.nutriScore.breakdown.negatives.saturates.value.toFixed(1)}g
+                                                {getPortionValue(safety.nutriScore.breakdown.negatives.saturates.value).toFixed(1)}g
                                             </Text>
+                                            <Text style={styles.nutriScoreUnit}>{portionLabel}</Text>
                                             <View style={[styles.nutriScorePoints, styles.nutriScorePointsNegative]}>
                                                 <Text style={styles.nutriScorePointsText}>-{safety.nutriScore.breakdown.negatives.saturates.points}</Text>
                                             </View>
@@ -1176,8 +1380,9 @@ export default function ProductSummary() {
                                         <View style={styles.nutriScoreRow}>
                                             <Text style={styles.nutriScoreLabel}>Sodium</Text>
                                             <Text style={styles.nutriScoreValue}>
-                                                {safety.nutriScore.breakdown.negatives.sodium.value}mg
+                                                {Math.round(getPortionValue(safety.nutriScore.breakdown.negatives.sodium.value))}mg
                                             </Text>
+                                            <Text style={styles.nutriScoreUnit}>{portionLabel}</Text>
                                             <View style={[styles.nutriScorePoints, styles.nutriScorePointsNegative]}>
                                                 <Text style={styles.nutriScorePointsText}>-{safety.nutriScore.breakdown.negatives.sodium.points}</Text>
                                             </View>
@@ -1192,21 +1397,25 @@ export default function ProductSummary() {
                     {!isBeautyProduct && (() => {
                         const warnings = [];
                         const n = product.nutriments || {};
-                        // High sodium
-                        if ((n.sodium || 0) > 400 || (n.salt || 0) > 1) {
-                            warnings.push({ icon: '🧂', text: 'People with high blood pressure (sodium)', detail: `${Math.round(n.sodium || n.salt * 400)}mg sodium per 100g` });
+                        // High sodium (n.sodium is in grams per 100g; 0.4g = 400mg)
+                        if ((n.sodium || 0) > 0.4 || (n.salt || 0) > 1) {
+                            const sodiumMg = Math.round(getPortionValue((n.sodium || (n.salt || 0) * 0.4) * 1000));
+                            warnings.push({ icon: '🧂', text: 'People with high blood pressure (sodium)', detail: `${sodiumMg}mg sodium ${portionLabel}` });
                         }
                         // High sugar
                         if ((n.sugars || 0) > 12.5) {
-                            warnings.push({ icon: '🍬', text: 'People managing diabetes or blood sugar', detail: `${n.sugars?.toFixed(1)}g sugar per 100g` });
+                            const sugarVal = getPortionValue(n.sugars).toFixed(1);
+                            warnings.push({ icon: '🍬', text: 'People managing diabetes or blood sugar', detail: `${sugarVal}g sugar ${portionLabel}` });
                         }
                         // High calories
                         if ((n.energy_kcal || n['energy-kcal'] || 0) > 400) {
-                            warnings.push({ icon: '🔥', text: 'People on low-calorie diets', detail: `${Math.round(n.energy_kcal || n['energy-kcal'])} kcal per 100g` });
+                            const kcalVal = Math.round(getPortionValue(n.energy_kcal || n['energy-kcal']));
+                            warnings.push({ icon: '🔥', text: 'People on low-calorie diets', detail: `${kcalVal} kcal ${portionLabel}` });
                         }
                         // High saturated fat
                         if ((n['saturated-fat'] || n.saturated_fat || 0) > 5) {
-                            warnings.push({ icon: '🫀', text: 'People watching cholesterol levels', detail: `${(n['saturated-fat'] || n.saturated_fat)?.toFixed(1)}g sat. fat per 100g` });
+                            const satFatVal = getPortionValue(n['saturated-fat'] || n.saturated_fat).toFixed(1);
+                            warnings.push({ icon: '🫀', text: 'People watching cholesterol levels', detail: `${satFatVal}g sat. fat ${portionLabel}` });
                         }
                         // Ultra-processed
                         if ((product.nova_group || product.novaGroup) >= 4) {
@@ -1282,7 +1491,9 @@ export default function ProductSummary() {
                                 </View>
                                 <Text style={styles.beautySafetyValue}>{beautySafety.clinicalScore}/{beautySafety.ingredientCount} studied</Text>
                             </View>
-
+                            <Text style={{ fontSize: 11, color: colors.mutedForeground, opacity: 0.7, fontFamily: fonts.sans, marginLeft: 32, marginTop: -4, marginBottom: 8, lineHeight: 15 }}>
+                                Reflects availability of long-term studies — not evidence of harm. Most cosmetic products fall in this range.
+                            </Text>
                             {/* Regulatory Status */}
                             <View style={styles.beautySafetyRow}>
                                 <View style={styles.beautySafetyLabel}>
@@ -1297,10 +1508,56 @@ export default function ProductSummary() {
                             </View>
                         </View>
                     )}
-                </View>
+                </Animated.View>
+
+                {/* V6: Sources & Methodology */}
+                <AnimatedPressable
+                    style={styles.sourcesCard}
+                    onPress={() => { hapticLight(); setShowSources(!showSources); }}
+                >
+                    <View style={styles.sourcesHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Award size={18} color={colors.chart1} />
+                            <Text style={styles.sourcesTitle}>Sources & Methodology</Text>
+                        </View>
+                        <ChevronDown
+                            size={18}
+                            color={colors.mutedForeground}
+                            style={{ transform: [{ rotate: showSources ? '180deg' : '0deg' }] }}
+                        />
+                    </View>
+                    {showSources && (
+                        <View style={styles.sourcesContent}>
+                            <View style={styles.sourceItem}>
+                                <Text style={styles.sourceLabel}>Product Data</Text>
+                                <Text style={styles.sourceValue}>Open Food Facts (openfoodfacts.org) — open-source, crowd-sourced database with 3M+ products</Text>
+                            </View>
+                            <View style={styles.sourceItem}>
+                                <Text style={styles.sourceLabel}>Nutritional Scoring</Text>
+                                <Text style={styles.sourceValue}>EU Nutri-Score algorithm (Santé Publique France) — scientifically validated A–E grading system</Text>
+                            </View>
+                            <View style={styles.sourceItem}>
+                                <Text style={styles.sourceLabel}>Processing Level</Text>
+                                <Text style={styles.sourceValue}>NOVA classification (Monteiro et al.) — University of São Paulo framework for food processing</Text>
+                            </View>
+                            <View style={styles.sourceItem}>
+                                <Text style={styles.sourceLabel}>Environmental Impact</Text>
+                                <Text style={styles.sourceValue}>Eco-Score (Agribalyse/ADEME) — lifecycle environmental impact assessment</Text>
+                            </View>
+                            <View style={styles.sourceItem}>
+                                <Text style={styles.sourceLabel}>Safety Analysis</Text>
+                                <Text style={styles.sourceValue}>GoodFor's proprietary engine combining age-based safety rules, allergen matching, dietary restriction checking, and additive risk assessment against WHO/EU guidelines</Text>
+                            </View>
+                            <View style={[styles.sourceItem, { borderBottomWidth: 0, paddingBottom: 0 }]}>
+                                <Text style={styles.sourceLabel}>Score Calculation</Text>
+                                <Text style={styles.sourceValue}>Base score from Nutri-Score, with personalised adjustments for allergens, dietary restrictions, health conditions, processing level, and environmental impact</Text>
+                            </View>
+                        </View>
+                    )}
+                </AnimatedPressable>
 
                 {/* Save Button */}
-                <Pressable
+                <AnimatedPressable
                     style={[styles.saveButton, isFavorite && styles.saveButtonActive]}
                     onPress={handleSaveToFavorites}
                 >
@@ -1308,7 +1565,56 @@ export default function ProductSummary() {
                     <Text style={styles.saveButtonText}>
                         {isFavorite ? 'Saved to Favorites' : 'Save to Favorites'}
                     </Text>
-                </Pressable>
+                </AnimatedPressable>
+
+                {/* V7: Add to Basket / Replace in Basket Button */}
+                <AnimatedPressable
+                    style={styles.basketButton}
+                    onPress={async () => {
+                        hapticMedium();
+                        try {
+                            if (!user?.id) {
+                                showAlert('Sign In Required', 'Please sign in to use the Smart Basket feature.');
+                                return;
+                            }
+                            const productPayload = {
+                                barcode: product?.code || product?.barcode || '',
+                                name: product?.product_name || product?.name || 'Unknown',
+                                brand: product?.brands || product?.brand || '',
+                                imageUrl: product?.image_url || null,
+                                safetyScore: safety?.adjustedScore ?? safety?.safeScore ?? 0,
+                                safetyLevel: safety?.safety || 'SAFE',
+                            };
+
+                            if (replaceItemId && replaceBasketId) {
+                                // Replace flow: swap old item for this one
+                                await replaceBasketItem(replaceItemId, replaceBasketId, productPayload);
+                                hapticSuccess();
+                                showAlert('Replaced! ✨', 'Product has been swapped in your basket.', [
+                                    { text: 'View Basket', onPress: () => router.push('/basket') },
+                                    { text: 'OK' },
+                                ]);
+                            } else {
+                                // Normal add flow
+                                const basket = await getOrCreateTodayBasket(user.id);
+                                await addProductToBasket(basket.id, productPayload);
+                                hapticSuccess();
+                                showAlert('Added to Basket! 🛒', 'Product added to your Smart Basket.', [
+                                    { text: 'View Basket', onPress: () => router.push('/basket') },
+                                    { text: 'OK' },
+                                ]);
+                            }
+                        } catch (e) {
+                            console.error('[Basket] Add/Replace error:', e?.message || e);
+                            showAlert('Error', e?.message || 'Could not update basket');
+                        }
+                    }}
+                >
+                    <ShoppingCart size={20} color={colors.primary} />
+                    <Text style={styles.basketButtonText}>
+                        {replaceItemId ? 'Replace in Basket' : 'Add to Basket'}
+                    </Text>
+                </AnimatedPressable>
 
                 {/* Alternatives Link */}
                 <Pressable
@@ -1323,6 +1629,7 @@ export default function ProductSummary() {
             <Pressable
                 style={[styles.floatingAiButton, { bottom: insets.bottom + 20 }]}
                 onPress={() => {
+                    hapticMedium();
                     // Build rich product context for AI
                     const productContext = {
                         name: product.name || product.product_name || 'Unknown Product',
@@ -1356,16 +1663,162 @@ export default function ProductSummary() {
                 }}
             >
                 <Sparkles size={20} color={colors.primaryForeground} />
-                <Text style={styles.floatingAiButtonText}>Ask AI</Text>
+                <Text style={styles.floatingAiButtonText}>Ask Lumi</Text>
             </Pressable>
 
             {/* Modals */}
-            <NutriScoreInfo
-                visible={showNutriScoreInfo}
-                onClose={() => setShowNutriScoreInfo(false)}
-                grade={nutriScoreInfo.grade}
-                breakdown={safety.nutriScore?.breakdown}
-            />
+            {/* Nutri-Score Info — Bottom Sheet */}
+            <Modal visible={showNutriScoreInfo} animationType="slide" transparent={true} onRequestClose={() => setShowNutriScoreInfo(false)}>
+                <View style={styles.modalOverlay}>
+                    {/* Tap the empty space above the card to dismiss */}
+                    <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowNutriScoreInfo(false)} />
+
+                    {/* Card — NOT inside any touchable, so ScrollView works on Android + iOS */}
+                    <View style={[styles.profilePickerModal, { paddingBottom: 40, maxHeight: '85%' }]}>
+                        {/* Header */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: spacing[4] }}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 20, fontFamily: fonts.heading, color: colors.foreground }}>Nutri-Score</Text>
+                                <Text style={{ fontSize: 13, fontFamily: fonts.sans, color: colors.mutedForeground, marginTop: 2 }} numberOfLines={1}>
+                                    {product.name || 'This product'}
+                                </Text>
+                            </View>
+                            <Pressable onPress={() => setShowNutriScoreInfo(false)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: colors.secondary, alignItems: 'center', justifyContent: 'center' }}>
+                                <X size={18} color={colors.mutedForeground} />
+                            </Pressable>
+                        </View>
+
+                        <ScrollView showsVerticalScrollIndicator={true} bounces={true} nestedScrollEnabled={true}>
+                            {/* A–E Scale */}
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing[5], paddingHorizontal: spacing[1] }}>
+                                {[
+                                    { g: 'A', c: '#038141', l: 'Excellent' },
+                                    { g: 'B', c: '#85BB2F', l: 'Good' },
+                                    { g: 'C', c: '#FECB02', l: 'Average' },
+                                    { g: 'D', c: '#EE8100', l: 'Poor' },
+                                    { g: 'E', c: '#E63E11', l: 'Very Poor' },
+                                ].map(item => {
+                                    const active = item.g === nutriScoreInfo.grade;
+                                    return (
+                                        <View key={item.g} style={{ alignItems: 'center', opacity: active ? 1 : 0.4 }}>
+                                            <View style={{
+                                                width: active ? 44 : 36, height: active ? 44 : 36,
+                                                borderRadius: active ? 22 : 18,
+                                                backgroundColor: item.c,
+                                                alignItems: 'center', justifyContent: 'center',
+                                                ...(active ? { shadowColor: item.c, shadowOpacity: 0.35, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 4 } : {}),
+                                            }}>
+                                                <Text style={{ color: '#fff', fontSize: active ? 20 : 16, fontFamily: fonts.heading }}>{item.g}</Text>
+                                            </View>
+                                            {active && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: item.c, marginTop: 6 }} />}
+                                            <Text style={{ fontSize: 10, fontFamily: active ? fonts.sansBold : fonts.sans, color: active ? item.c : colors.mutedForeground, marginTop: active ? 4 : 6 }}>
+                                                {item.l}
+                                            </Text>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+
+                            {/* What this grade means */}
+                            <View style={{ backgroundColor: `${nutriScoreInfo.color}10`, borderRadius: radius.lg, padding: spacing[4], marginBottom: spacing[4], borderLeftWidth: 3, borderLeftColor: nutriScoreInfo.color }}>
+                                <Text style={{ fontSize: 15, fontFamily: fonts.sansBold, color: colors.foreground, marginBottom: 4 }}>
+                                    Grade {nutriScoreInfo.grade} — {
+                                        { A: 'Excellent nutritional quality', B: 'Good nutritional quality', C: 'Average nutritional quality', D: 'Poor nutritional quality', E: 'Very poor nutritional quality' }[nutriScoreInfo.grade] || 'Unknown'
+                                    }
+                                </Text>
+                                <Text style={{ fontSize: 13, fontFamily: fonts.sans, color: colors.mutedForeground, lineHeight: 19 }}>
+                                    {
+                                        {
+                                            A: 'This product is rich in beneficial nutrients like fiber, protein and vitamins, while being low in sugar, salt and calories.',
+                                            B: 'A solid choice with good nutritional balance and moderate amounts of nutrients to limit.',
+                                            C: 'Average nutritional profile. Contains moderate calories, sugars or saturated fats — balance with healthier options.',
+                                            D: 'This product is high in nutrients that should be limited such as sugar, saturated fat or sodium. Consider healthier alternatives.',
+                                            E: 'Very high in calories, sugars, saturated fats or sodium and low in beneficial nutrients. Limit consumption.',
+                                        }[nutriScoreInfo.grade] || ''
+                                    }
+                                </Text>
+                            </View>
+
+                            {/* Score Breakdown — what contributes to this score */}
+                            {safety.nutriScore?.breakdown && (
+                                <View style={{ marginBottom: spacing[4] }}>
+                                    <Text style={{ fontSize: 12, fontFamily: fonts.sansBold, color: colors.mutedForeground, letterSpacing: 0.8, marginBottom: spacing[3], textTransform: 'uppercase' }}>
+                                        What affects this score
+                                    </Text>
+
+                                    <View style={{ backgroundColor: colors.card, borderRadius: radius.xl, padding: spacing[4], borderWidth: 1, borderColor: colors.border }}>
+                                        {/* Negative factors */}
+                                        {safety.nutriScore.breakdown.negatives && (
+                                            <>
+                                                <Text style={{ fontSize: 13, fontFamily: fonts.sansBold, color: colors.chart3, marginBottom: spacing[2] }}>Nutrients to limit</Text>
+                                                {Object.entries(safety.nutriScore.breakdown.negatives).map(([key, val]) => (
+                                                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: spacing[2] }}>
+                                                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: val.points >= 6 ? colors.chart3 : val.points > 0 ? colors.chart2 : colors.chart1 }} />
+                                                        <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.sansMedium, color: colors.foreground }}>
+                                                            {key === 'saturates' ? 'Saturated fat' : key === 'sodium' ? 'Sodium' : key.charAt(0).toUpperCase() + key.slice(1)}
+                                                        </Text>
+                                                        <Text style={{ fontSize: 12, fontFamily: fonts.sans, color: colors.mutedForeground, width: 55, textAlign: 'right' }}>
+                                                            {val.value}{val.unit || ''}
+                                                        </Text>
+                                                        <View style={{ width: 50, height: 4, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' }}>
+                                                            <View style={{ height: '100%', borderRadius: 2, backgroundColor: val.points >= 6 ? colors.chart3 : val.points > 0 ? colors.chart2 : colors.chart1, width: `${Math.min(100, (val.points / (val.max || 10)) * 100)}%` }} />
+                                                        </View>
+                                                        <Text style={{ fontSize: 11, fontFamily: fonts.sansBold, color: val.points >= 6 ? colors.chart3 : colors.chart4, width: 28, textAlign: 'right' }}>
+                                                            {val.points}/{val.max}
+                                                        </Text>
+                                                    </View>
+                                                ))}
+                                            </>
+                                        )}
+
+                                        <View style={{ height: 1, backgroundColor: colors.border, marginVertical: spacing[3] }} />
+
+                                        {/* Positive factors */}
+                                        {safety.nutriScore.breakdown.positives && (
+                                            <>
+                                                <Text style={{ fontSize: 13, fontFamily: fonts.sansBold, color: colors.chart1, marginBottom: spacing[2] }}>Beneficial nutrients</Text>
+                                                {Object.entries(safety.nutriScore.breakdown.positives).map(([key, val]) => (
+                                                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 5, gap: spacing[2] }}>
+                                                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: val.points > 0 ? colors.chart1 : colors.border }} />
+                                                        <Text style={{ flex: 1, fontSize: 13, fontFamily: fonts.sansMedium, color: colors.foreground }}>
+                                                            {key === 'fruitVeg' ? 'Fruit & vegetables' : key.charAt(0).toUpperCase() + key.slice(1)}
+                                                        </Text>
+                                                        <Text style={{ fontSize: 12, fontFamily: fonts.sans, color: colors.mutedForeground, width: 55, textAlign: 'right' }}>
+                                                            {typeof val.value === 'number' ? (val.unit === '%' ? `${val.value}%` : `${val.value.toFixed(1)}${val.unit || 'g'}`) : val.value}
+                                                        </Text>
+                                                        <View style={{ width: 50, height: 4, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' }}>
+                                                            <View style={{ height: '100%', borderRadius: 2, backgroundColor: val.points > 0 ? colors.chart1 : colors.border, width: `${Math.min(100, (val.points / (val.max || 5)) * 100)}%` }} />
+                                                        </View>
+                                                        <Text style={{ fontSize: 11, fontFamily: fonts.sansBold, color: val.points > 0 ? colors.chart1 : colors.chart4, width: 28, textAlign: 'right' }}>
+                                                            {val.points}/{val.max}
+                                                        </Text>
+                                                    </View>
+                                                ))}
+                                            </>
+                                        )}
+                                    </View>
+                                </View>
+                            )}
+
+                            {/* About Nutri-Score */}
+                            <View style={{ backgroundColor: `${colors.primary}08`, borderRadius: radius.lg, padding: spacing[4], marginBottom: spacing[4], borderWidth: 1, borderColor: `${colors.primary}12` }}>
+                                <Text style={{ fontSize: 13, fontFamily: fonts.sansBold, color: colors.primary, marginBottom: spacing[1] }}>About Nutri-Score</Text>
+                                <Text style={{ fontSize: 12, fontFamily: fonts.sans, color: colors.mutedForeground, lineHeight: 18 }}>
+                                    Nutri-Score is developed by Santé Publique France and adopted across the EU. It calculates a score based on nutrients per 100g — negative points for energy, sugars, saturated fats and sodium are subtracted, then positive points for fiber, protein and fruit/vegetable content are added. The final score determines the A-to-E grade.
+                                </Text>
+                            </View>
+
+                            {/* Got it button */}
+                            <Pressable
+                                style={{ backgroundColor: colors.primary, paddingVertical: spacing[3], borderRadius: radius.xl, alignItems: 'center', marginBottom: spacing[2] }}
+                                onPress={() => setShowNutriScoreInfo(false)}
+                            >
+                                <Text style={{ fontSize: 16, fontFamily: fonts.sansBold, color: colors.primaryForeground }}>Got it</Text>
+                            </Pressable>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
 
             <IngredientDetailModal
                 visible={showIngredientDetail}
@@ -1460,94 +1913,96 @@ export default function ProductSummary() {
                     style={styles.modalOverlay}
                     onPress={() => setShowProfilePicker(false)}
                 >
-                    <View style={styles.profilePickerModal}>
-                        <Text style={styles.profilePickerTitle}>View Safety For</Text>
+                    <View style={[styles.profilePickerModal, { maxHeight: '80%' }]}>
+                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+                            <Text style={styles.profilePickerTitle}>View Safety For</Text>
 
-                        {/* Main Profile */}
-                        <Pressable
-                            style={[styles.profilePickerOption, !selectedMember && styles.profilePickerOptionActive]}
-                            onPress={() => {
-                                setSelectedMember(null);
-                                setShowProfilePicker(false);
-                            }}
-                        >
-                            <View style={[styles.profilePickerAvatar, { backgroundColor: colors.primary }]}>
-                                <Text style={styles.avatarText}>{profile?.full_name?.[0] || 'Y'}</Text>
-                            </View>
-                            <View style={styles.profilePickerInfo}>
-                                <Text style={styles.profilePickerName}>{profile?.full_name || 'You'}</Text>
-                                <Text style={styles.profilePickerMeta}>Main Profile</Text>
-                            </View>
-                            {!selectedMember && (
-                                <CheckCircle size={20} color={colors.primary} />
-                            )}
-                        </Pressable>
-
-                        {/* Family Members */}
-                        {familyMembers.map((member) => (
+                            {/* Main Profile */}
                             <Pressable
-                                key={member.id}
-                                style={[styles.profilePickerOption, selectedMember?.id === member.id && styles.profilePickerOptionActive]}
+                                style={[styles.profilePickerOption, !selectedMember && styles.profilePickerOptionActive]}
                                 onPress={() => {
-                                    setSelectedMember(member);
+                                    setSelectedMember(null);
                                     setShowProfilePicker(false);
                                 }}
                             >
-                                <View style={[styles.profilePickerAvatar, { backgroundColor: colors.accent }]}>
-                                    <Text style={styles.avatarText}>{member.name?.[0] || '?'}</Text>
+                                <View style={[styles.profilePickerAvatar, { backgroundColor: colors.primary }]}>
+                                    <Text style={styles.avatarText}>{profile?.full_name?.[0] || 'Y'}</Text>
                                 </View>
                                 <View style={styles.profilePickerInfo}>
-                                    <Text style={styles.profilePickerName}>{member.name}</Text>
-                                    <Text style={styles.profilePickerMeta}>
-                                        {member.age_group === 'infant' ? 'Infant (0-2)' : member.age_group === 'child' ? 'Child (3-12)' : 'Adult'}
-                                    </Text>
+                                    <Text style={styles.profilePickerName}>{profile?.full_name || 'You'}</Text>
+                                    <Text style={styles.profilePickerMeta}>Main Profile</Text>
                                 </View>
-                                {selectedMember?.id === member.id && (
+                                {!selectedMember && (
                                     <CheckCircle size={20} color={colors.primary} />
                                 )}
                             </Pressable>
-                        ))}
 
-                        {/* V4: Family Overview Option */}
-                        {familyMembers.length > 0 && (
-                            <>
-                                <View style={{ height: 1, backgroundColor: `${colors.border}60`, marginVertical: spacing[2] }} />
+                            {/* Family Members */}
+                            {familyMembers.map((member) => (
                                 <Pressable
-                                    style={[styles.profilePickerOption, selectedMember === 'FAMILY_OVERVIEW' && styles.profilePickerOptionActive]}
+                                    key={member.id}
+                                    style={[styles.profilePickerOption, selectedMember?.id === member.id && styles.profilePickerOptionActive]}
                                     onPress={() => {
-                                        setSelectedMember('FAMILY_OVERVIEW');
+                                        setSelectedMember(member);
                                         setShowProfilePicker(false);
                                     }}
                                 >
-                                    <View style={[styles.profilePickerAvatar, { backgroundColor: colors.chart1 }]}>
-                                        <Users size={18} color={colors.primaryForeground} />
+                                    <View style={[styles.profilePickerAvatar, { backgroundColor: colors.accent }]}>
+                                        <Text style={styles.avatarText}>{member.name?.[0] || '?'}</Text>
                                     </View>
                                     <View style={styles.profilePickerInfo}>
-                                        <Text style={styles.profilePickerName}>Family Overview</Text>
-                                        <Text style={styles.profilePickerMeta}>Safety for all members</Text>
+                                        <Text style={styles.profilePickerName}>{member.name}</Text>
+                                        <Text style={styles.profilePickerMeta}>
+                                            {member.age_group === 'infant' ? 'Infant (0-2)' : member.age_group === 'child' ? 'Child (3-12)' : 'Adult'}
+                                        </Text>
                                     </View>
-                                    {selectedMember === 'FAMILY_OVERVIEW' && (
+                                    {selectedMember?.id === member.id && (
                                         <CheckCircle size={20} color={colors.primary} />
                                     )}
                                 </Pressable>
-                            </>
-                        )}
+                            ))}
 
-                        {familyMembers.length === 0 && (
-                            <View style={styles.noFamilyMembers}>
-                                <Users size={32} color={colors.mutedForeground} />
-                                <Text style={styles.noFamilyText}>No family members added yet</Text>
-                                <Pressable
-                                    style={styles.addFamilyButton}
-                                    onPress={() => {
-                                        setShowProfilePicker(false);
-                                        router.push('/family-members');
-                                    }}
-                                >
-                                    <Text style={styles.addFamilyButtonText}>Add Family Member</Text>
-                                </Pressable>
-                            </View>
-                        )}
+                            {/* V4: Family Overview Option */}
+                            {familyMembers.length > 0 && (
+                                <>
+                                    <View style={{ height: 1, backgroundColor: `${colors.border}60`, marginVertical: spacing[2] }} />
+                                    <Pressable
+                                        style={[styles.profilePickerOption, selectedMember === 'FAMILY_OVERVIEW' && styles.profilePickerOptionActive]}
+                                        onPress={() => {
+                                            setSelectedMember('FAMILY_OVERVIEW');
+                                            setShowProfilePicker(false);
+                                        }}
+                                    >
+                                        <View style={[styles.profilePickerAvatar, { backgroundColor: colors.chart1 }]}>
+                                            <Users size={18} color={colors.primaryForeground} />
+                                        </View>
+                                        <View style={styles.profilePickerInfo}>
+                                            <Text style={styles.profilePickerName}>Family Overview</Text>
+                                            <Text style={styles.profilePickerMeta}>Safety for all members</Text>
+                                        </View>
+                                        {selectedMember === 'FAMILY_OVERVIEW' && (
+                                            <CheckCircle size={20} color={colors.primary} />
+                                        )}
+                                    </Pressable>
+                                </>
+                            )}
+
+                            {familyMembers.length === 0 && (
+                                <View style={styles.noFamilyMembers}>
+                                    <Users size={32} color={colors.mutedForeground} />
+                                    <Text style={styles.noFamilyText}>No family members added yet</Text>
+                                    <Pressable
+                                        style={styles.addFamilyButton}
+                                        onPress={() => {
+                                            setShowProfilePicker(false);
+                                            router.push('/family-members');
+                                        }}
+                                    >
+                                        <Text style={styles.addFamilyButtonText}>Add Family Member</Text>
+                                    </Pressable>
+                                </View>
+                            )}
+                        </ScrollView>
                     </View>
                 </Pressable>
             </Modal>
@@ -1560,7 +2015,9 @@ const styles = StyleSheet.create({
     blurLeft: { position: 'absolute', top: '25%', left: -128, width: 256, height: 256, backgroundColor: colors.chart1, opacity: 0.05, borderRadius: 128 },
     blurRight: { position: 'absolute', bottom: '25%', right: -96, width: 192, height: 192, backgroundColor: colors.accent, opacity: 0.3, borderRadius: 96 },
     header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing[6], paddingBottom: spacing[4], zIndex: 20 },
-    headerButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: `${colors.card}CC`, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4 },
+    headerButtonShadow: { shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 4, elevation: 1 },
+    headerButton: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' },
+    blurContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
     headerTitle: { fontSize: 18, fontFamily: fonts.heading.bold, color: colors.primary },
     scrollView: { flex: 1, zIndex: 10 },
     scrollContent: { paddingHorizontal: spacing[6] },
@@ -1646,8 +2103,54 @@ const styles = StyleSheet.create({
     saveButton: { backgroundColor: colors.primary, paddingVertical: spacing[4], borderRadius: radius['2xl'], flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2], shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8 },
     saveButtonActive: { backgroundColor: colors.chart1 },
     saveButtonText: { fontSize: 16, fontFamily: fonts.sans.bold, color: colors.primaryForeground },
+    basketButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2], paddingVertical: spacing[4], borderRadius: radius['2xl'], borderWidth: 2, borderColor: colors.primary, marginTop: spacing[3] },
+    basketButtonText: { fontSize: 16, fontFamily: fonts.sans.bold, color: colors.primary },
     alternativesLink: { alignItems: 'center', paddingVertical: spacing[4] },
     alternativesText: { fontSize: 14, fontFamily: fonts.sans.semiBold, color: colors.primary },
+    // V6: Sources & Methodology
+    sourcesCard: {
+        backgroundColor: colors.card,
+        borderRadius: radius.xl,
+        borderWidth: 1,
+        borderColor: `${colors.chart1}25`,
+        padding: spacing[4],
+        marginBottom: spacing[4],
+    },
+    sourcesHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    sourcesTitle: {
+        fontSize: 14,
+        fontFamily: fonts.sans.semiBold,
+        color: colors.foreground,
+    },
+    sourcesContent: {
+        marginTop: spacing[4],
+        paddingTop: spacing[3],
+        borderTopWidth: 1,
+        borderTopColor: `${colors.border}50`,
+    },
+    sourceItem: {
+        paddingVertical: spacing[3],
+        borderBottomWidth: 1,
+        borderBottomColor: `${colors.border}30`,
+    },
+    sourceLabel: {
+        fontSize: 12,
+        fontFamily: fonts.sans.bold,
+        color: colors.chart1,
+        marginBottom: 4,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    sourceValue: {
+        fontSize: 13,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        lineHeight: 18,
+    },
     // Beauty Safety Analysis Styles
     beautySafetyRow: {
         flexDirection: 'row',
@@ -1754,6 +2257,13 @@ const styles = StyleSheet.create({
         fontFamily: fonts.sans.semiBold,
         color: colors.foreground,
         minWidth: 50,
+        textAlign: 'right',
+    },
+    nutriScoreUnit: {
+        fontSize: 10,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        minWidth: 55,
         textAlign: 'right',
     },
     nutriScorePoints: {
@@ -1957,16 +2467,27 @@ const styles = StyleSheet.create({
     profilePickerOption: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: spacing[3],
+        padding: spacing[4],
         borderRadius: radius.xl,
         marginBottom: spacing[2],
         backgroundColor: colors.muted,
+        borderWidth: 1,
+        borderColor: 'transparent',
         gap: spacing[3],
     },
     profilePickerOptionActive: {
-        backgroundColor: `${colors.primary}15`,
-        borderWidth: 1,
+        backgroundColor: `${colors.primary}10`,
         borderColor: colors.primary,
+        shadowColor: colors.primary,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    avatarText: {
+        fontSize: 18,
+        fontFamily: fonts.sans.bold,
+        color: colors.primaryForeground,
     },
     profilePickerAvatar: {
         width: 40,

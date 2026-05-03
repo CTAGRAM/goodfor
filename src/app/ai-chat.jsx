@@ -9,7 +9,7 @@ import {
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
-    Alert,
+
     FlatList,
     Image
 } from "react-native";
@@ -32,17 +32,23 @@ import {
     Trash2,
     ChevronRight,
     Edit2,
-    Package
+    Package,
+    Camera
 } from "lucide-react-native";
 import { colors, fonts, radius } from "@/constants/theme";
 import { sendMessage } from "@/lib/openai";
+import { analyzeImageForChat } from "@/lib/geminiVision";
+import * as ImagePicker from 'expo-image-picker';
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
 import MarkdownText from "@/components/MarkdownText";
+import { useAlert } from "@/contexts/AlertContext";
+import { TypingDots } from '@/components/AnimatedEffects';
 
 const HISTORY_STORAGE_KEY = 'goodfor_chat_history';
 
 export default function AIChat() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const params = useLocalSearchParams();
@@ -53,6 +59,7 @@ export default function AIChat() {
 
     // View Modes: 'history' (list of chats) | 'chat' (active conversation)
     const [viewMode, setViewMode] = useState('history');
+    const [initialMessageSent, setInitialMessageSent] = useState(false);
 
     // Chat State
     const [chatHistory, setChatHistory] = useState([]);
@@ -63,16 +70,17 @@ export default function AIChat() {
     const [isLoading, setIsLoading] = useState(false);
     const [productInfo, setProductInfo] = useState(null); // Product context from scan
     const [autoSendDone, setAutoSendDone] = useState(false);
+    const [pendingImage, setPendingImage] = useState(null); // { uri, base64, mimeType }
 
     // Context State
     const [userContext, setUserContext] = useState({});
     const scrollViewRef = useRef(null);
 
     const [quickPrompts, setQuickPrompts] = useState([
-        "Is this safe for kids?",
-        "Explain ingredients",
-        "Healthier options?",
-        "Any allergens?",
+        "Is this product safe for kids?",
+        "Does this product have any health risks?",
+        "What are healthier alternatives to this product?",
+        "Does this product contain allergens?",
     ]);
 
     // Update prompts based on product context
@@ -80,25 +88,25 @@ export default function AIChat() {
         if (productInfo) {
             if (productInfo.isBeautyProduct) {
                 setQuickPrompts([
-                    "Safe for sensitive skin?",
-                    "Explain preservatives",
-                    "Endocrine disruptors?",
-                    "Better alternatives?"
+                    "Are these ingredients safe for my skin?",
+                    "Does this product have any health risks?",
+                    "What are healthier alternatives to this product?",
+                    "Explain the ingredients in this product simply",
                 ]);
             } else {
                 setQuickPrompts([
-                    "Is this healthy?",
-                    "Explain additives",
-                    "Too much sugar?",
-                    "Allergen warning?"
+                    "Is this product safe for kids?",
+                    "Does this product have any health risks?",
+                    "What are healthier alternatives to this product?",
+                    "Does this product contain allergens?",
                 ]);
             }
         } else {
             setQuickPrompts([
-                "How does scoring work?",
-                "Analyze my recent scans",
-                "Health tips for kids",
-                "Avoid list help"
+                "Is this product safe for kids?",
+                "Does this product have any health risks?",
+                "What are healthier alternatives to this product?",
+                "Explain the ingredients in this product simply",
             ]);
         }
     }, [productInfo]);
@@ -138,6 +146,26 @@ export default function AIChat() {
             }
         }
     }, [params.productContext]);
+
+    // Handle initialMessage from AI tab text input
+    useEffect(() => {
+        // If explicitly asked to show history, force it
+        if (params.showHistory === 'true') {
+            setViewMode('history');
+            return;
+        }
+        if (params.initialMessage && !initialMessageSent) {
+            setInitialMessageSent(true);
+            const newId = Date.now().toString();
+            setCurrentChatId(newId);
+            setMessages([]);
+            setViewMode('chat');
+            // Delay slightly so state is settled before sending
+            setTimeout(() => {
+                handleSend(params.initialMessage);
+            }, 300);
+        }
+    }, [params.initialMessage, params.showHistory]);
 
     // Auto-send the initial product analysis prompt once context is loaded
     useEffect(() => {
@@ -356,7 +384,7 @@ export default function AIChat() {
     };
 
     const deleteChat = (id) => {
-        Alert.alert(
+        showAlert(
             "Delete Chat",
             "Are you sure you want to delete this conversation?",
             [
@@ -392,7 +420,7 @@ export default function AIChat() {
         }
 
         if (count >= limit) {
-            Alert.alert(
+            showAlert(
                 "Limit Reached",
                 `You've used your ${limit} free chats for today. Upgrade to Pro for more!`,
                 [
@@ -423,7 +451,7 @@ export default function AIChat() {
 
     const handleSend = async (manualText = null) => {
         const textToSend = manualText || message;
-        if (!textToSend.trim() || isLoading) return;
+        if ((!textToSend.trim() && !pendingImage) || isLoading) return;
 
         // Check Limit
         const limitCheck = await checkRateLimit();
@@ -435,6 +463,8 @@ export default function AIChat() {
 
         setMessages(newMessages);
         setMessage("");
+        const currentImage = pendingImage;
+        setPendingImage(null);
         setIsLoading(true);
 
         // Update Usage
@@ -445,7 +475,18 @@ export default function AIChat() {
         // For now, we just update DB.
 
         try {
-            const response = await sendMessage(newMessages, selectedAge, userContext, !!productInfo?.isBeautyProduct);
+            let response;
+            if (currentImage) {
+                // Use Gemini Vision for image analysis
+                response = await analyzeImageForChat(
+                    currentImage.base64,
+                    currentImage.mimeType || 'image/jpeg',
+                    userMsgContent || 'What can you tell me about this product?',
+                    userContext
+                );
+            } else {
+                response = await sendMessage(newMessages, selectedAge, userContext, !!productInfo?.isBeautyProduct);
+            }
             const assistantMessage = { role: "assistant", content: response };
             const finalMessages = [...newMessages, assistantMessage];
 
@@ -574,8 +615,8 @@ export default function AIChat() {
                 </TouchableOpacity>
 
                 <View style={styles.headerCenter}>
-                    <Text style={styles.headerTitle}>AI Assistant</Text>
-                    <Text style={styles.headerSubtitle}>{selectedAge.toUpperCase()}</Text>
+                    <Text style={styles.headerTitle}>Lumi</Text>
+                    <Text style={styles.headerSubtitle}>{activeFamilyMember?.name || profile?.full_name || 'Your Profile'}</Text>
                 </View>
 
                 {/* Real User Profile Image */}
@@ -620,10 +661,12 @@ export default function AIChat() {
 
                 {messages.length === 0 && !productInfo ? (
                     <View style={styles.emptyState}>
-                        <View style={styles.emptyIconBg}>
-                            <Sparkles size={32} color={colors.primary} />
-                        </View>
-                        <Text style={styles.emptyTitle}>Ask Goodfor AI</Text>
+                        <Image
+                            source={require("../../assets/images/lumi-mascot.png")}
+                            style={{ width: 120, height: 120, marginBottom: 16 }}
+                            resizeMode="contain"
+                        />
+                        <Text style={styles.emptyTitle}>Ask Lumi</Text>
                         <Text style={styles.emptyDesc}>
                             I have your recent scans, family profiles, and preferences loaded. Ask me anything!
                         </Text>
@@ -667,10 +710,14 @@ export default function AIChat() {
                 {isLoading && (
                     <View style={[styles.messageContainer, styles.assistantMessageContainer]}>
                         <View style={styles.assistantAvatar}>
-                            <Bot size={16} color={colors.primaryForeground} />
+                            <Image
+                                source={require('../../assets/images/lumi-mascot.png')}
+                                style={{ width: 28, height: 28, borderRadius: 14 }}
+                                resizeMode="contain"
+                            />
                         </View>
-                        <View style={[styles.messageBubble, styles.assistantBubble]}>
-                            <ActivityIndicator size="small" color={colors.primary} />
+                        <View style={[styles.messageBubble, styles.assistantBubble, { paddingVertical: 10, paddingHorizontal: 14 }]}>
+                            <TypingDots dotSize={8} />
                         </View>
                     </View>
                 )}
@@ -689,7 +736,7 @@ export default function AIChat() {
                             <TouchableOpacity
                                 key={index}
                                 style={styles.chipButton}
-                                onPress={() => handleSend(prompt)}
+                                onPress={() => setMessage(prompt)}
                             >
                                 <Text style={styles.chipText}>{prompt}</Text>
                             </TouchableOpacity>
@@ -711,17 +758,48 @@ export default function AIChat() {
                     </View>
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={styles.ageSelector}>
+                            <User size={16} color={colors.primary} />
+                        </View>
+
+                        {/* V6: Image picker for photo analysis */}
                         <TouchableOpacity
                             style={styles.ageSelector}
-                            onPress={() => {
-                                const next = { adult: 'child', child: 'toddler', toddler: 'adult' };
-                                setSelectedAge(next[selectedAge]);
+                            onPress={async () => {
+                                try {
+                                    const result = await ImagePicker.launchImageLibraryAsync({
+                                        mediaTypes: ['images'],
+                                        quality: 0.8,
+                                        base64: true,
+                                    });
+                                    if (!result.canceled && result.assets?.[0]?.base64) {
+                                        const asset = result.assets[0];
+                                        setPendingImage({
+                                            uri: asset.uri,
+                                            base64: asset.base64,
+                                            mimeType: asset.mimeType || 'image/jpeg',
+                                        });
+                                    }
+                                } catch (e) {
+                                    console.error('[AIChat] Image picker error:', e);
+                                }
                             }}
                         >
-                            {selectedAge === 'adult' && <User size={16} color={colors.primary} />}
-                            {selectedAge === 'child' && <UserCircle size={16} color={colors.primary} />}
-                            {selectedAge === 'toddler' && <Baby size={16} color={colors.primary} />}
+                            <Camera size={16} color={pendingImage ? colors.chart1 : colors.primary} />
                         </TouchableOpacity>
+
+                        {/* Pending image preview */}
+                        {pendingImage && (
+                            <View style={{ position: 'relative' }}>
+                                <Image source={{ uri: pendingImage.uri }} style={{ width: 32, height: 32, borderRadius: 8 }} />
+                                <TouchableOpacity
+                                    style={{ position: 'absolute', top: -6, right: -6, backgroundColor: colors.destructive, borderRadius: 8, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' }}
+                                    onPress={() => setPendingImage(null)}
+                                >
+                                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>✕</Text>
+                                </TouchableOpacity>
+                            </View>
+                        )}
 
                         <TextInput
                             style={styles.input}
@@ -733,9 +811,9 @@ export default function AIChat() {
                         />
 
                         <TouchableOpacity
-                            style={[styles.sendBtn, (!message.trim() || isLoading) && styles.sendBtnDisabled]}
+                            style={[styles.sendBtn, (!message.trim() && !pendingImage || isLoading) && styles.sendBtnDisabled]}
                             onPress={() => handleSend()}
-                            disabled={!message.trim() || isLoading}
+                            disabled={(!message.trim() && !pendingImage) || isLoading}
                         >
                             <ArrowUp size={20} color="#fff" />
                         </TouchableOpacity>
@@ -747,16 +825,12 @@ export default function AIChat() {
 
     const renderHistoryView = () => (
         <View style={styles.container}>
-            <View style={styles.blurTopRight} />
-            <View style={styles.blurLeft} />
-
+            {/* Header */}
             <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                     <ArrowLeft size={24} color={colors.foreground} />
                 </TouchableOpacity>
                 <Text style={styles.historyHeaderTitle}>Conversations</Text>
-
-                {/* Real User Profile Image */}
                 <View style={styles.profileContainer}>
                     {renderAvatar()}
                 </View>
@@ -765,29 +839,92 @@ export default function AIChat() {
             <FlatList
                 data={chatHistory}
                 keyExtractor={item => item.id}
-                renderItem={renderHistoryItem}
-                contentContainerStyle={styles.historyList}
+                renderItem={({ item }) => (
+                    <TouchableOpacity
+                        style={{
+                            flexDirection: 'row', alignItems: 'center',
+                            backgroundColor: colors.card, padding: 16,
+                            borderRadius: 20, marginBottom: 10,
+                            borderWidth: 1, borderColor: `${colors.border}50`,
+                        }}
+                        onPress={() => openChat(item)}
+                    >
+                        <View style={{
+                            width: 42, height: 42, borderRadius: 21,
+                            backgroundColor: `${colors.primary}10`,
+                            alignItems: 'center', justifyContent: 'center', marginRight: 14,
+                        }}>
+                            <MessageSquare size={18} color={colors.primary} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 15, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: 3 }} numberOfLines={1}>
+                                {item.title}
+                            </Text>
+                            <Text style={{ fontSize: 11, fontFamily: fonts.sans.regular, color: colors.mutedForeground }}>
+                                {new Date(item.timestamp).toLocaleDateString()} • {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                        </View>
+                        <TouchableOpacity
+                            style={{ padding: 8 }}
+                            onPress={() => deleteChat(item.id)}
+                        >
+                            <Trash2 size={16} color={`${colors.mutedForeground}80`} />
+                        </TouchableOpacity>
+                    </TouchableOpacity>
+                )}
+                contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
                 ListHeaderComponent={
-                    <View style={styles.historyHeaderComponent}>
-                        <TouchableOpacity style={styles.startChatCard} onPress={startNewChat}>
-                            <View style={styles.startChatIcon}>
-                                <Bot size={28} color="#fff" />
+                    <View style={{ marginBottom: 16 }}>
+                        {/* New Chat Button */}
+                        <TouchableOpacity
+                            style={{
+                                flexDirection: 'row', alignItems: 'center',
+                                backgroundColor: colors.primary, padding: 16,
+                                borderRadius: 20, marginBottom: 24,
+                                shadowColor: colors.primary, shadowOpacity: 0.15,
+                                shadowRadius: 8, shadowOffset: { width: 0, height: 4 },
+                                elevation: 4,
+                            }}
+                            onPress={startNewChat}
+                        >
+                            <View style={{
+                                width: 44, height: 44, borderRadius: 22,
+                                backgroundColor: 'rgba(255,255,255,0.2)',
+                                alignItems: 'center', justifyContent: 'center', marginRight: 14,
+                            }}>
+                                <Plus size={24} color="#fff" />
                             </View>
-                            <View>
-                                <Text style={styles.startChatTitle}>New Analysis</Text>
-                                <Text style={styles.startChatDesc}>Ask about ingredients & safety</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.primaryForeground }}>
+                                    New Conversation
+                                </Text>
+                                <Text style={{ fontSize: 12, fontFamily: fonts.sans.regular, color: `${colors.primaryForeground}cc` }}>
+                                    Ask about ingredients & safety
+                                </Text>
                             </View>
-                            <ChevronRight size={20} color={colors.mutedForeground} style={{ marginLeft: 'auto' }} />
+                            <ChevronRight size={20} color={`${colors.primaryForeground}90`} />
                         </TouchableOpacity>
 
-                        {chatHistory.length > 0 && <Text style={styles.sectionTitle}>RECENT CHATS</Text>}
+                        {chatHistory.length > 0 && (
+                            <Text style={{ fontSize: 11, fontFamily: fonts.sans.bold, color: colors.mutedForeground, letterSpacing: 1.5, marginBottom: 12 }}>
+                                RECENT CHATS
+                            </Text>
+                        )}
                     </View>
                 }
                 ListEmptyComponent={
-                    <View style={styles.emptyHistory}>
-                        <MessageSquare size={40} color={colors.muted} />
-                        <Text style={styles.emptyHistoryText}>No conversations yet.</Text>
-                        <Text style={styles.emptyHistorySub}>Start a new chat to track health analysis.</Text>
+                    <View style={{ alignItems: 'center', justifyContent: 'center', marginTop: 40, paddingHorizontal: 40 }}>
+                        <Image
+                            source={require("../../assets/images/lumi-mascot.png")}
+                            style={{ width: 100, height: 100, marginBottom: 16 }}
+                            resizeMode="contain"
+                        />
+                        <Text style={{ fontSize: 17, fontFamily: fonts.sans.bold, color: colors.foreground, marginBottom: 6 }}>
+                            No conversations yet
+                        </Text>
+                        <Text style={{ fontSize: 13, fontFamily: fonts.sans.regular, color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }}>
+                            Start a new chat to get personalised health insights from Lumi.
+                        </Text>
                     </View>
                 }
             />

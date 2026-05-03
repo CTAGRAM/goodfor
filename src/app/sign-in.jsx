@@ -9,7 +9,6 @@ import {
     KeyboardAvoidingView,
     Platform,
     Image,
-    Alert,
     ActivityIndicator
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -22,30 +21,18 @@ import {
     Eye,
     EyeOff,
     ArrowRight,
-    Phone,
-    Hash,
-    MessageCircle
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
-import { signInWithEmail, signInWithGoogle, sendOtpToPhone, verifyPhoneOtp, signUpWithPhoneAfterVerify } from "@/lib/supabaseAuth";
-import { sendVerifyOTP, checkVerifyOTP } from "@/lib/twilioWhatsApp";
-import * as WebBrowser from "expo-web-browser";
-import * as Linking from "expo-linking";
+import { signInWithEmail, signInWithGoogle } from "@/lib/supabaseAuth";
 import { useCallback } from "react";
+import { useAlert } from "@/contexts/AlertContext";
+import { hapticMedium, hapticSuccess, hapticError } from "@/lib/haptics";
 
-export const useWarmUpBrowser = () => {
-    useCallback(() => {
-        void WebBrowser.warmUpAsync();
-        return () => {
-            void WebBrowser.coolDownAsync();
-        };
-    }, []);
-};
 
-WebBrowser.maybeCompleteAuthSession();
 
 export default function SignIn() {
-    useWarmUpBrowser();
+    const { showAlert } = useAlert();
+
 
     const insets = useSafeAreaInsets();
     const router = useRouter();
@@ -55,17 +42,13 @@ export default function SignIn() {
     const [showPassword, setShowPassword] = useState(false);
     const [loading, setLoading] = useState(false);
 
-    // Phase 5: Phone/WhatsApp OTP Authentication state
-    const [authMethod, setAuthMethod] = useState('email'); // 'email', 'phone', or 'whatsapp'
-    const [phoneNumber, setPhoneNumber] = useState("");
-    const [otpCode, setOtpCode] = useState("");
-    const [otpSent, setOtpSent] = useState(false);
+
 
     const handleSignIn = async () => {
         const trimmedEmail = email.trim();
 
         if (!trimmedEmail || !password) {
-            Alert.alert("Error", "Please enter both email and password");
+            showAlert("Error", "Please enter both email and password");
             return;
         }
 
@@ -77,10 +60,10 @@ export default function SignIn() {
             console.log('[SignIn] Sign in successful, session:', !!data.session);
 
             if (data.session) {
-                router.replace("/(tabs)/home");
+                router.replace("/paywall");
             } else {
                 setLoading(false);
-                Alert.alert("Error", "Sign in failed. Please check your credentials and try again.");
+                showAlert("Error", "Sign in failed. Please check your credentials and try again.");
             }
         } catch (err) {
             console.error('[SignIn] Error caught:', err);
@@ -90,130 +73,19 @@ export default function SignIn() {
             if (errorMsg.includes('Invalid login')) errorMsg = "Incorrect email or password. Please try again.";
             else if (errorMsg.includes('Email not confirmed')) errorMsg = "Please verify your email first. Check your inbox for a verification code.";
             else if (errorMsg.includes('timeout') || errorMsg.includes('network')) errorMsg = "Connection issue. Please check your internet and try again.";
-            Alert.alert("Sign In Failed", errorMsg);
+            showAlert("Sign In Failed", errorMsg);
         } finally {
             if (loading) setLoading(false);
         }
     };
 
-    // Phone OTP handlers (Supabase Native via Twilio)
-    const handleSendPhoneOtp = async () => {
-        if (!phoneNumber.trim()) {
-            Alert.alert("Error", "Please enter your phone number");
-            return;
-        }
 
-        setLoading(true);
-        try {
-            await sendOtpToPhone(phoneNumber, false); // false = sign-in
-            setOtpSent(true);
-            Alert.alert("OTP Sent", "Please check your phone for the verification code");
-        } catch (err) {
-            console.error('[SignIn] SMS OTP error:', err);
-            Alert.alert("Error", err.message || "Failed to send OTP");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleVerifyPhoneOtp = async () => {
-        if (!otpCode.trim() || otpCode.length !== 6) {
-            Alert.alert("Error", "Please enter a valid 6-digit OTP");
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const data = await verifyPhoneOtp(phoneNumber, otpCode);
-            if (data.session) {
-                router.replace("/(tabs)/home");
-            } else {
-                Alert.alert("Error", "Verification failed. Please try again.");
-            }
-        } catch (err) {
-            console.error('[SignIn] SMS verification error:', err);
-            Alert.alert("Verification Failed", err.message || "Invalid OTP");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // WhatsApp OTP handlers (Twilio Verify API)
-    const handleSendWhatsAppOtp = async () => {
-        if (!phoneNumber.trim()) {
-            Alert.alert("Error", "Please enter your WhatsApp number");
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const result = await sendVerifyOTP(phoneNumber, 'whatsapp');
-            if (result.success) {
-                setOtpSent(true);
-                Alert.alert("OTP Sent", "Please check your WhatsApp for the verification code");
-            } else {
-                Alert.alert("Error", result.error || "Failed to send WhatsApp OTP");
-            }
-        } catch (err) {
-            console.error('[SignIn] WhatsApp OTP error:', err);
-            Alert.alert("Error", err.message || "Failed to send WhatsApp OTP");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleVerifyWhatsAppOtp = async () => {
-        if (!otpCode.trim() || otpCode.length !== 6) {
-            Alert.alert("Error", "Please enter a valid 6-digit OTP");
-            return;
-        }
-
-        setLoading(true);
-        try {
-            const result = await checkVerifyOTP(phoneNumber, otpCode);
-            if (result.success) {
-                // WhatsApp OTP verified - create Supabase user
-                console.log('[SignIn] WhatsApp verified, creating Supabase user...');
-                await signUpWithPhoneAfterVerify(phoneNumber);
-                router.replace("/(tabs)/home");
-            } else {
-                Alert.alert("Verification Failed", result.error || "Invalid OTP. Please check the code and try again.");
-            }
-        } catch (err) {
-            console.error('[SignIn] WhatsApp verification error:', err);
-            Alert.alert("Verification Failed", err.message || "Invalid OTP");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // V5: Resend OTP handler
-    const handleResendOtp = async () => {
-        setLoading(true);
-        try {
-            if (authMethod === 'whatsapp') {
-                const result = await sendVerifyOTP(phoneNumber, 'whatsapp');
-                if (result.success) {
-                    Alert.alert("Code Resent", "A new verification code has been sent to your WhatsApp.");
-                } else {
-                    Alert.alert("Error", result.error || "Failed to resend code");
-                }
-            } else {
-                await sendOtpToPhone(phoneNumber, false);
-                Alert.alert("Code Resent", "A new verification code has been sent via SMS.");
-            }
-        } catch (err) {
-            console.error('[SignIn] Resend OTP error:', err);
-            Alert.alert("Error", err.message || "Failed to resend verification code. Please try again.");
-        } finally {
-            setLoading(false);
-        }
-    };
 
 
     const handleGoogleSignIn = useCallback(async () => {
         try {
             setLoading(true);
+            hapticMedium();
             console.log('[SignIn] Starting Google OAuth flow...');
 
             const { session, error } = await signInWithGoogle();
@@ -224,43 +96,25 @@ export default function SignIn() {
             }
 
             if (session) {
-                console.log('[SignIn] ✅ Session received from WebBrowser, navigating to home');
-                router.replace("/(tabs)/home");
+                hapticSuccess();
+                console.log('[SignIn] ✅ Google sign-in successful — AuthContext will handle navigation');
+                // DO NOT navigate manually here.
+                // AuthContext's navigation effect will redirect to home once profile loads.
+                // Manual navigation causes a race condition and redirect loop.
             } else {
-                // In Expo Go, this is expected - deep link handler will complete the flow
-                console.log('[SignIn] ℹ️ No session from WebBrowser - waiting for deep link callback (normal in Expo Go)');
-
-                // Set a 15-second timeout in case deep link handler doesn't complete
-                setTimeout(() => {
-                    console.warn('[SignIn] ⏱️ OAuth timeout - no callback received after 15 seconds');
-                    setLoading(false);
-                    Alert.alert(
-                        "Sign In Taking Too Long",
-                        "The sign-in process is taking longer than expected. This can happen with some network conditions.",
-                        [
-                            {
-                                text: "Try Again",
-                                onPress: () => handleGoogleSignIn()
-                            },
-                            {
-                                text: "Cancel",
-                                style: "cancel"
-                            }
-                        ]
-                    );
-                }, 15000);
-
-                // Keep loading state active so user sees "processing" screen
-                // The deep link handler will complete auth and navigate automatically
+                // In Expo Go, deep link handler will complete the flow
+                console.log('[SignIn] ℹ️ No session from WebBrowser — waiting for deep link callback');
+                // Keep loading state — AuthContext will clear it when profile loads
             }
         } catch (err) {
             console.error('[SignIn] ❌ Google OAuth error:', err);
+            hapticError();
             const errorMessage = err?.message || "An error occurred during Google sign in";
-            Alert.alert("Google Sign In Failed", errorMessage);
-            setLoading(false); // Only clear loading on actual error
+            showAlert("Google Sign In Failed", errorMessage);
+            setLoading(false);
         }
-        // Note: Don't clear loading in finally block - let deep link handler complete the flow
-    }, [router]);
+        // Don't clear loading — AuthContext manages auth state and will trigger navigation
+    }, []);
 
     return (
         <KeyboardAvoidingView
@@ -322,171 +176,78 @@ export default function SignIn() {
                     <View style={styles.dividerLine} />
                 </View>
 
-                {/* Phase 5: Auth Method Tabs */}
-                <View style={styles.authTabs}>
-                    <TouchableOpacity
-                        style={[styles.authTab, authMethod === 'email' && styles.authTabActive]}
-                        onPress={() => { setAuthMethod('email'); setOtpSent(false); }}
-                    >
-                        <Mail size={16} color={authMethod === 'email' ? colors.primary : colors.mutedForeground} />
-                        <Text style={[styles.authTabText, authMethod === 'email' && styles.authTabTextActive]}>Email</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.authTab, authMethod === 'phone' && styles.authTabActive]}
-                        onPress={() => { setAuthMethod('phone'); setOtpSent(false); }}
-                    >
-                        <Phone size={16} color={authMethod === 'phone' ? colors.primary : colors.mutedForeground} />
-                        <Text style={[styles.authTabText, authMethod === 'phone' && styles.authTabTextActive]}>SMS</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.authTab, authMethod === 'whatsapp' && styles.authTabActive]}
-                        onPress={() => { setAuthMethod('whatsapp'); setOtpSent(false); }}
-                    >
-                        <MessageCircle size={16} color={authMethod === 'whatsapp' ? '#25D366' : colors.mutedForeground} />
-                        <Text style={[styles.authTabText, authMethod === 'whatsapp' && styles.authTabTextActive]}>WhatsApp</Text>
-                    </TouchableOpacity>
-                </View>
+                {/* V5: Simplified — removed SMS/WhatsApp OTP tabs (client request: remove friction) */}
+                {/* Only Email + Google remain as auth methods */}
 
-                {/* Form */}
+                {/* V5: Email/Password only — no OTP flows */}
                 <View style={styles.form}>
-                    {authMethod === 'email' ? (
-                        <>
-                            {/* Email Field */}
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Email Address</Text>
-                                <View style={styles.inputContainer}>
-                                    <View style={styles.inputIcon}>
-                                        <Mail size={20} color={colors.mutedForeground} />
-                                    </View>
-                                    <TextInput
-                                        style={styles.textInput}
-                                        placeholder="name@example.com"
-                                        placeholderTextColor={colors.mutedForeground}
-                                        value={email}
-                                        onChangeText={setEmail}
-                                        keyboardType="email-address"
-                                        autoCapitalize="none"
-                                        autoComplete="email"
-                                    />
-                                </View>
+                    {/* Email Field */}
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Email Address</Text>
+                        <View style={styles.inputContainer}>
+                            <View style={styles.inputIcon}>
+                                <Mail size={20} color={colors.mutedForeground} />
                             </View>
+                            <TextInput
+                                style={styles.textInput}
+                                placeholder="name@example.com"
+                                placeholderTextColor={colors.mutedForeground}
+                                value={email}
+                                onChangeText={setEmail}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                                autoComplete="email"
+                            />
+                        </View>
+                    </View>
 
-                            {/* Password Field */}
-                            <View style={styles.inputGroup}>
-                                <View style={styles.passwordLabelRow}>
-                                    <Text style={styles.inputLabel}>Password</Text>
-                                    <TouchableOpacity onPress={() => router.push('/forgot-password')}>
-                                        <Text style={styles.forgotText}>Forgot?</Text>
-                                    </TouchableOpacity>
-                                </View>
-                                <View style={styles.inputContainer}>
-                                    <View style={styles.inputIcon}>
-                                        <Lock size={20} color={colors.mutedForeground} />
-                                    </View>
-                                    <TextInput
-                                        style={styles.textInput}
-                                        placeholder="••••••••"
-                                        placeholderTextColor={colors.mutedForeground}
-                                        value={password}
-                                        onChangeText={setPassword}
-                                        secureTextEntry={!showPassword}
-                                        autoComplete="password"
-                                    />
-                                    <TouchableOpacity
-                                        style={styles.eyeButton}
-                                        onPress={() => setShowPassword(!showPassword)}
-                                    >
-                                        {showPassword ? (
-                                            <EyeOff size={20} color={colors.mutedForeground} />
-                                        ) : (
-                                            <Eye size={20} color={colors.mutedForeground} />
-                                        )}
-                                    </TouchableOpacity>
-                                </View>
+                    {/* Password Field */}
+                    <View style={styles.inputGroup}>
+                        <View style={styles.passwordLabelRow}>
+                            <Text style={styles.inputLabel}>Password</Text>
+                            <TouchableOpacity onPress={() => router.push('/forgot-password')}>
+                                <Text style={styles.forgotText}>Forgot?</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.inputContainer}>
+                            <View style={styles.inputIcon}>
+                                <Lock size={20} color={colors.mutedForeground} />
                             </View>
-                        </>
-                    ) : (
-                        <>
-                            {/* Phone Number Field */}
-                            {!otpSent ? (
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.inputLabel}>Phone Number</Text>
-                                    <View style={styles.inputContainer}>
-                                        <View style={styles.inputIcon}>
-                                            <Phone size={20} color={colors.mutedForeground} />
-                                        </View>
-                                        <TextInput
-                                            style={styles.textInput}
-                                            placeholder="+91 9876543210"
-                                            placeholderTextColor={colors.mutedForeground}
-                                            value={phoneNumber}
-                                            onChangeText={setPhoneNumber}
-                                            keyboardType="phone-pad"
-                                            autoComplete="tel"
-                                        />
-                                    </View>
-                                    <Text style={styles.phoneHint}>
-                                        Enter your phone number with country code
-                                    </Text>
-                                </View>
-                            ) : (
-                                <>
-                                    <View style={styles.otpSentBanner}>
-                                        <Text style={styles.otpSentText}>
-                                            {authMethod === 'whatsapp' ? 'WhatsApp' : 'SMS'} OTP sent to {phoneNumber}
-                                        </Text>
-                                        <TouchableOpacity onPress={() => setOtpSent(false)}>
-                                            <Text style={styles.otpChangeText}>Change</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                    <View style={styles.inputGroup}>
-                                        <Text style={styles.inputLabel}>Verification Code</Text>
-                                        <View style={styles.inputContainer}>
-                                            <View style={styles.inputIcon}>
-                                                <Hash size={20} color={colors.mutedForeground} />
-                                            </View>
-                                            <TextInput
-                                                style={styles.textInput}
-                                                placeholder="123456"
-                                                placeholderTextColor={colors.mutedForeground}
-                                                value={otpCode}
-                                                onChangeText={setOtpCode}
-                                                keyboardType="number-pad"
-                                                maxLength={6}
-                                            />
-                                        </View>
-                                    </View>
-                                </>
-                            )}
-                        </>
-                    )}
+                            <TextInput
+                                style={styles.textInput}
+                                placeholder="••••••••"
+                                placeholderTextColor={colors.mutedForeground}
+                                value={password}
+                                onChangeText={setPassword}
+                                secureTextEntry={!showPassword}
+                                autoComplete="password"
+                            />
+                            <TouchableOpacity
+                                style={styles.eyeButton}
+                                onPress={() => setShowPassword(!showPassword)}
+                            >
+                                {showPassword ? (
+                                    <EyeOff size={20} color={colors.mutedForeground} />
+                                ) : (
+                                    <Eye size={20} color={colors.mutedForeground} />
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
                 </View>
 
-                {/* Sign In Button - now inside ScrollView */}
+                {/* Sign In Button */}
                 <View style={styles.buttonSection}>
                     <TouchableOpacity
-                        style={[styles.signInButton, loading && styles.signInButtonDisabled, authMethod === 'whatsapp' && styles.whatsappButton]}
-                        onPress={
-                            authMethod === 'email'
-                                ? handleSignIn
-                                : authMethod === 'phone'
-                                    ? (otpSent ? handleVerifyPhoneOtp : handleSendPhoneOtp)
-                                    : (otpSent ? handleVerifyWhatsAppOtp : handleSendWhatsAppOtp)
-                        }
+                        style={[styles.signInButton, loading && styles.signInButtonDisabled]}
+                        onPress={handleSignIn}
                         disabled={loading}
                     >
                         {loading ? (
                             <ActivityIndicator size="small" color={colors.primaryForeground} />
                         ) : (
                             <>
-                                <Text style={styles.signInButtonText}>
-                                    {authMethod === 'email'
-                                        ? 'Sign In'
-                                        : authMethod === 'phone'
-                                            ? (otpSent ? 'Verify OTP' : 'Send OTP')
-                                            : (otpSent ? 'Verify WhatsApp' : 'Send WhatsApp OTP')
-                                    }
-                                </Text>
+                                <Text style={styles.signInButtonText}>Sign In</Text>
                                 <View style={styles.signInButtonIcon}>
                                     <ArrowRight size={20} color={colors.primaryForeground} />
                                 </View>
@@ -494,25 +255,22 @@ export default function SignIn() {
                         )}
                     </TouchableOpacity>
 
-                    {/* V5: Resend OTP button */}
-                    {authMethod !== 'email' && otpSent && (
-                        <TouchableOpacity
-                            style={styles.resendButton}
-                            onPress={handleResendOtp}
-                            disabled={loading}
-                        >
-                            <Text style={styles.resendButtonText}>
-                                Didn't receive the code? <Text style={styles.switchAuthLink}>Resend</Text>
-                            </Text>
-                        </TouchableOpacity>
-                    )}
-
                     <TouchableOpacity
                         style={styles.switchAuthButton}
                         onPress={() => router.push("/sign-up")}
                     >
                         <Text style={styles.switchAuthText}>
                             New here? <Text style={styles.switchAuthLink}>Create an account</Text>
+                        </Text>
+                    </TouchableOpacity>
+
+                    {/* V5: Continue as Guest */}
+                    <TouchableOpacity
+                        style={[styles.switchAuthButton, { marginTop: 4 }]}
+                        onPress={() => router.replace("/(tabs)/home")}
+                    >
+                        <Text style={[styles.switchAuthText, { color: colors.mutedForeground }]}>
+                            or <Text style={[styles.switchAuthLink, { color: colors.primary }]}>continue as guest</Text>
                         </Text>
                     </TouchableOpacity>
                 </View>

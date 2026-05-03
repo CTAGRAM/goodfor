@@ -1,8 +1,10 @@
-import { View, Text, Pressable, Image, StyleSheet } from "react-native";
+import { View, Text, Pressable, Image, StyleSheet, ScrollView } from "react-native";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowLeft, ArrowRight, CheckCircle, AlertTriangle, XCircle, BarChart3 } from "lucide-react-native";
+import Animated, { FadeInDown } from "react-native-reanimated";
+import AnimatedPressable from "@/components/AnimatedPressable";
 
 export default function SafetyScoring() {
     const router = useRouter();
@@ -27,15 +29,13 @@ export default function SafetyScoring() {
             </View>
 
             {/* Content Container */}
-            <View style={styles.contentContainer}>
+            <ScrollView 
+                style={{ flex: 1 }} 
+                contentContainerStyle={styles.contentContainer}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Illustration and Card Container */}
                 <View style={styles.topSection}>
-                    {/* Panda Detective Illustration */}
-                    <Image
-                        source={require("../../../assets/images/bdc9e4d1e0df310da38cb0618e13579dafc2d452.png")}
-                        style={styles.illustration}
-                        resizeMode="contain"
-                    />
 
                     {/* Scoring System Card */}
                     <View style={styles.cardWrapper}>
@@ -51,7 +51,7 @@ export default function SafetyScoring() {
                             <View style={styles.cardBlur} />
 
                             {/* Safe Score */}
-                            <View style={[styles.scoreRow, { marginBottom: 12 }]}>
+                            <Animated.View entering={FadeInDown.delay(100).springify().damping(14)} style={[styles.scoreRow, { marginBottom: 12 }]}>
                                 <View style={styles.scoreLeft}>
                                     <View style={[styles.iconCircle, styles.safeIconCircle]}>
                                         <CheckCircle size={20} color="#34A853" fill="#34A853" />
@@ -64,10 +64,10 @@ export default function SafetyScoring() {
                                 <View style={[styles.scoreBadge, styles.safeBadge]}>
                                     <Text style={styles.badgeText}>94</Text>
                                 </View>
-                            </View>
+                            </Animated.View>
 
                             {/* Use with Caution Score */}
-                            <View style={[styles.scoreRow, { marginBottom: 12 }]}>
+                            <Animated.View entering={FadeInDown.delay(200).springify().damping(14)} style={[styles.scoreRow, { marginBottom: 12 }]}>
                                 <View style={styles.scoreLeft}>
                                     <View style={[styles.iconCircle, styles.cautionIconCircle]}>
                                         <AlertTriangle size={20} color="#FBBC04" fill="#FBBC04" />
@@ -80,10 +80,10 @@ export default function SafetyScoring() {
                                 <View style={[styles.scoreBadge, styles.cautionBadge]}>
                                     <Text style={styles.badgeText}>52</Text>
                                 </View>
-                            </View>
+                            </Animated.View>
 
                             {/* Avoid Score */}
-                            <View style={styles.scoreRow}>
+                            <Animated.View entering={FadeInDown.delay(300).springify().damping(14)} style={styles.scoreRow}>
                                 <View style={styles.scoreLeft}>
                                     <View style={[styles.iconCircle, styles.avoidIconCircle]}>
                                         <XCircle size={20} color="#EA4335" fill="#EA4335" />
@@ -96,7 +96,7 @@ export default function SafetyScoring() {
                                 <View style={[styles.scoreBadge, styles.avoidBadge]}>
                                     <Text style={styles.badgeText}>28</Text>
                                 </View>
-                            </View>
+                            </Animated.View>
                         </View>
                     </View>
                 </View>
@@ -108,21 +108,29 @@ export default function SafetyScoring() {
                     <View style={styles.dot} />
                     <View style={styles.dotActive} />
                 </View>
-            </View>
+
+                {/* Text Content */}
+                <Animated.Text entering={FadeInDown.delay(400).springify().damping(14)} style={styles.title}>
+                    Transparent{"\n"}safety scores
+                </Animated.Text>
+                <Animated.Text entering={FadeInDown.delay(500).springify().damping(14)} style={styles.description}>
+                    Our science-backed scores are based on deep ingredient research. Shop with confidence knowing exactly what goes into your body.
+                </Animated.Text>
+            </ScrollView>
 
             {/* Footer */}
             <View style={[styles.footer, { paddingBottom: insets.bottom + 32 }]}>
                 <View style={styles.footerContent}>
                     {/* Next Button */}
-                    <Pressable
-                        onPress={() => router.push("/onboarding/complete")}
+                    <AnimatedPressable
+                        onPress={() => router.push("/onboarding/question-intro")}
                         style={styles.nextButton}
                     >
                         <Text style={styles.nextButtonText}>Next</Text>
                         <View style={styles.arrowContainer}>
                             <ArrowRight size={20} color="#FFF" strokeWidth={1.25} />
                         </View>
-                    </Pressable>
+                    </AnimatedPressable>
 
                     {/* Sign In Link */}
                     <Pressable
@@ -176,28 +184,25 @@ const styles = StyleSheet.create({
         borderRadius: 22,
     },
     contentContainer: {
-        flex: 1,
+        flexGrow: 1,
         paddingHorizontal: 32,
         justifyContent: "center",
+        paddingBottom: 40,
     },
     topSection: {
-        position: "relative",
-        height: 453,
+        marginTop: 40,
         marginBottom: 40,
     },
     illustration: {
         position: "absolute",
-        right: -28,
-        top: -56,
-        width: 213,
-        height: 320,
+        right: 0,
+        top: -30,
+        width: 180,
+        height: 270,
         zIndex: 2,
     },
     cardWrapper: {
-        position: "absolute",
-        top: 133,
-        left: 0,
-        right: 0,
+        width: "100%",
     },
     cardHeader: {
         flexDirection: "row",
@@ -321,6 +326,20 @@ const styles = StyleSheet.create({
         height: 8,
         borderRadius: 4,
         backgroundColor: "#34A853",
+    },
+    title: {
+        fontSize: 28,
+        fontFamily: "Rubik_800ExtraBold",
+        color: "#1A1D1C",
+        lineHeight: 30.8,
+        marginTop: 40,
+    },
+    description: {
+        fontSize: 17,
+        fontFamily: "Rubik_400Regular",
+        color: "#6C7570",
+        lineHeight: 27.63,
+        marginTop: 5,
     },
     footer: {
         paddingHorizontal: 32,

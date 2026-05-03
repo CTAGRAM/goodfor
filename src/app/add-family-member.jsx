@@ -6,7 +6,7 @@ import {
     ScrollView,
     Pressable,
     TextInput,
-    Alert,
+    
     ActivityIndicator,
     Image
 } from 'react-native';
@@ -27,8 +27,10 @@ import {
 import { colors, fonts, spacing, radius } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabaseAuth';
+import { useAlert } from "@/contexts/AlertContext";
 
 export default function AddFamilyMember() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { user } = useAuth();
@@ -54,6 +56,23 @@ export default function AddFamilyMember() {
     const [isBreastfeeding, setIsBreastfeeding] = useState(false);
     const [cosmeticAllergens, setCosmeticAllergens] = useState([]);
     const [allergenSeverity, setAllergenSeverity] = useState({});
+    // Phase 3: Region
+    const [region, setRegion] = useState('US');
+    // Parity with main profile: Health Concerns + Info Preferences
+    const [healthConcerns, setHealthConcerns] = useState([]);
+    const [infoPreferences, setInfoPreferences] = useState([]);
+    // Health Goals (parity with main profile)
+    const [healthGoals, setHealthGoals] = useState([]);
+    const [customAllergen, setCustomAllergen] = useState('');
+
+    const addCustomAllergen = () => {
+        if (!customAllergen.trim()) return;
+        const normalized = customAllergen.trim().toLowerCase();
+        if (!allergens.includes(normalized)) {
+            setAllergens([...allergens, normalized]);
+        }
+        setCustomAllergen('');
+    };
 
     // Helper: Age Group Calculator
     const getAgeGroup = (ageVal) => {
@@ -87,6 +106,12 @@ export default function AddFamilyMember() {
 
     // Fetch member data if editing
     useEffect(() => {
+        if (memberId === 'main') {
+            // Safety check: if somehow navigated here with 'main' ID, redirect to main profile edit
+            router.replace('/edit-profile');
+            return;
+        }
+
         if (isEditMode) {
             loadMemberData();
         }
@@ -101,7 +126,7 @@ export default function AddFamilyMember() {
 
         if (error) {
             console.error('[AddFamilyMember] Load error:', error);
-            Alert.alert('Error', 'Failed to load family member data');
+            showAlert('Error', 'Failed to load family member data');
             router.back();
         } else {
             setName(data.name || '');
@@ -122,6 +147,10 @@ export default function AddFamilyMember() {
             setIsBreastfeeding(data.is_breastfeeding || false);
             setCosmeticAllergens(data.cosmetic_allergens || []);
             setAllergenSeverity(data.allergen_severity || {});
+            setRegion(data.region || 'US');
+            setHealthConcerns(data.health_concerns || []);
+            setInfoPreferences(data.info_preferences || []);
+            setHealthGoals(data.health_goals || []);
         }
         setLoading(false);
     };
@@ -140,7 +169,7 @@ export default function AddFamilyMember() {
             }
         } catch (error) {
             console.error('[AddFamilyMember] Image picker error:', error);
-            Alert.alert('Error', 'Failed to pick image');
+            showAlert('Error', 'Failed to pick image');
         }
     };
 
@@ -170,7 +199,7 @@ export default function AddFamilyMember() {
             setAvatarUrl(publicUrl);
         } catch (error) {
             console.error('[AddFamilyMember] Upload error:', error);
-            Alert.alert('Error', 'Failed to upload image');
+            showAlert('Error', 'Failed to upload image');
         } finally {
             setUploadingImage(false);
         }
@@ -178,7 +207,7 @@ export default function AddFamilyMember() {
 
     const handleSave = async () => {
         if (!name.trim()) {
-            Alert.alert('Error', 'Please enter a name');
+            showAlert('Error', 'Please enter a name');
             return;
         }
 
@@ -211,6 +240,10 @@ export default function AddFamilyMember() {
                         is_breastfeeding: isBreastfeeding,
                         cosmetic_allergens: cosmeticAllergens,
                         allergen_severity: allergenSeverity,
+                        region: region,
+                        health_concerns: healthConcerns,
+                        info_preferences: infoPreferences,
+                        health_goals: healthGoals,
                     })
                     .eq('id', memberId)
                     .select();
@@ -234,6 +267,10 @@ export default function AddFamilyMember() {
                         is_breastfeeding: isBreastfeeding,
                         cosmetic_allergens: cosmeticAllergens,
                         allergen_severity: allergenSeverity,
+                        region: region,
+                        health_concerns: healthConcerns,
+                        info_preferences: infoPreferences,
+                        health_goals: healthGoals,
                     })
                     .select();
             }
@@ -243,7 +280,7 @@ export default function AddFamilyMember() {
             if (error) throw error;
 
             console.log('[AddFamilyMember] Success:', data);
-            Alert.alert('Success', `${name} ${isEditMode ? 'updated' : 'added'} successfully!`, [
+            showAlert('Success', `${name} ${isEditMode ? 'updated' : 'added'} successfully!`, [
                 { text: 'OK', onPress: () => router.back() }
             ]);
 
@@ -253,11 +290,11 @@ export default function AddFamilyMember() {
 
             // Check for specific Supabase errors
             if (msg.includes('duplicate key')) {
-                Alert.alert('Error', 'A family member with this name already exists.');
+                showAlert('Error', 'A family member with this name already exists.');
             } else if (msg.includes('timeout')) {
-                Alert.alert('Error', 'Request timed out. Please check your connection.');
+                showAlert('Error', 'Request timed out. Please check your connection.');
             } else {
-                Alert.alert('Error', `Failed to ${isEditMode ? 'update' : 'add'} family member: ${msg}`);
+                showAlert('Error', `Failed to ${isEditMode ? 'update' : 'add'} family member: ${msg}`);
             }
         } finally {
             setSaving(false);
@@ -428,6 +465,7 @@ export default function AddFamilyMember() {
                         )}
                     </View>
 
+                    {/* Dietary Restrictions */}
                     <View style={styles.prefCard}>
                         <View style={styles.prefHeader}>
                             <Text style={styles.prefTitle}>Dietary Restrictions</Text>
@@ -449,8 +487,84 @@ export default function AddFamilyMember() {
                         </View>
                     </View>
 
-                    {/* V4: Skin & Beauty Preferences */}
-                    {/* Cosmetic Personalization Section */}
+                    {/* Health Goals */}
+                    <View style={styles.prefCard}>
+                        <View style={styles.prefHeader}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.prefTitle}>Health Goals</Text>
+                                <Text style={styles.prefSubtitle}>We'll tailor analysis to these goals</Text>
+                            </View>
+                        </View>
+                        <View style={styles.tagContainer}>
+                            {[
+                                { key: 'lose_weight', label: '🎯 Lose Weight' },
+                                { key: 'gain_muscle', label: '💪 Build Muscle' },
+                                { key: 'eat_healthier', label: '🥗 Eat Healthier' },
+                                { key: 'manage_diabetes', label: '🩸 Manage Diabetes' },
+                                { key: 'reduce_sugar', label: '🚫 Reduce Sugar' },
+                                { key: 'heart_health', label: '❤️ Heart Health' },
+                                { key: 'improve_energy', label: '⚡ Improve Energy' },
+                                { key: 'better_sleep', label: '😴 Better Sleep' },
+                            ].map((goal) => (
+                                <Pressable
+                                    key={goal.key}
+                                    style={[styles.tag, healthGoals.includes(goal.key) && styles.tagActive]}
+                                    onPress={() => setHealthGoals(prev => prev.includes(goal.key) ? prev.filter(g => g !== goal.key) : [...prev, goal.key])}
+                                >
+                                    <Text style={[styles.tagText, healthGoals.includes(goal.key) && styles.tagTextActive]}>
+                                        {goal.label}
+                                    </Text>
+                                    {healthGoals.includes(goal.key) && <X size={14} color={colors.chart1} />}
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Health Concerns */}
+                    <View style={styles.prefCard}>
+                        <View style={styles.prefHeader}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.prefTitle}>Health Concerns</Text>
+                                <Text style={styles.prefSubtitle}>We'll flag related ingredients</Text>
+                            </View>
+                        </View>
+                        <View style={styles.tagContainer}>
+                            {['Allergies', 'Digestive issues', 'Skin sensitivity', 'Weight management', 'Heart health', 'Diabetes', 'Anxiety', 'Afternoon fatigue'].map((c) => (
+                                <Pressable
+                                    key={c}
+                                    style={[styles.tag, healthConcerns.includes(c) && styles.tagActive]}
+                                    onPress={() => setHealthConcerns(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c])}
+                                >
+                                    <Text style={[styles.tagText, healthConcerns.includes(c) && styles.tagTextActive]}>{c}</Text>
+                                    {healthConcerns.includes(c) && <X size={14} color={colors.chart1} />}
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Info Preferences */}
+                    <View style={styles.prefCard}>
+                        <View style={styles.prefHeader}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.prefTitle}>Information Preferences</Text>
+                                <Text style={styles.prefSubtitle}>What matters most in scans</Text>
+                            </View>
+                        </View>
+                        <View style={styles.tagContainer}>
+                            {['Allergen warnings', 'Safer alternatives', 'Additive details', 'Nutritional breakdown', 'Ingredient safety'].map((p) => (
+                                <Pressable
+                                    key={p}
+                                    style={[styles.tag, infoPreferences.includes(p) && styles.tagActive]}
+                                    onPress={() => setInfoPreferences(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p])}
+                                >
+                                    <Text style={[styles.tagText, infoPreferences.includes(p) && styles.tagTextActive]}>{p}</Text>
+                                    {infoPreferences.includes(p) && <X size={14} color={colors.chart1} />}
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Beauty Preferences Header */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>BEAUTY PREFERENCES</Text>
                     </View>
@@ -462,7 +576,7 @@ export default function AddFamilyMember() {
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                     <Text style={styles.prefTitle}>Pregnancy & Nursing</Text>
                                     <Pressable
-                                        onPress={() => Alert.alert(
+                                        onPress={() => showAlert(
                                             "Why This Matters",
                                             "During pregnancy and breastfeeding, certain ingredients can be absorbed through the skin or ingested and may affect the baby.\n\nWe flag:\n• Retinoids (Vitamin A derivatives)\n• Salicylic acid in high doses\n• Certain essential oils\n• Chemical sunscreen ingredients\n• Parabens and phthalates\n\nThis helps you make safer choices for you and your baby.",
                                             [{ text: "Got it" }]
@@ -509,10 +623,10 @@ export default function AddFamilyMember() {
                             {['Normal', 'Dry', 'Oily', 'Combination', 'Sensitive'].map((type) => (
                                 <Pressable
                                     key={type}
-                                    style={[styles.tag, skinType === type.toLowerCase() && { backgroundColor: `${colors.primary}15`, borderColor: colors.primary }]}
+                                    style={[styles.tag, skinType?.toLowerCase() === type.toLowerCase() && { backgroundColor: colors.primary, borderColor: colors.primary }]}
                                     onPress={() => setSkinType(type.toLowerCase())}
                                 >
-                                    <Text style={[styles.tagText, skinType === type.toLowerCase() && { color: colors.primary }]}>
+                                    <Text style={[styles.tagText, skinType?.toLowerCase() === type.toLowerCase() && { color: colors.primaryForeground }]}>
                                         {type}
                                     </Text>
                                 </Pressable>
@@ -520,6 +634,60 @@ export default function AddFamilyMember() {
                         </View>
                     </View>
 
+                    {/* Region Selection */}
+                    <View style={styles.prefCard}>
+                        <View style={styles.prefHeader}>
+                            <Text style={styles.prefTitle}>Region</Text>
+                            <Text style={styles.prefSubtitle}>Determines food safety standards & alternatives</Text>
+                        </View>
+                        <View style={styles.tagContainer}>
+                            {['US', 'EU', 'UK'].map((r) => (
+                                <Pressable
+                                    key={r}
+                                    style={[styles.tag, region === r && styles.tagActive]}
+                                    onPress={() => setRegion(r)}
+                                >
+                                    <Text style={[styles.tagText, region === r && styles.tagTextActive]}>
+                                        {r} ({r === 'US' ? 'United States' : r === 'EU' ? 'Europe' : 'United Kingdom'})
+                                    </Text>
+                                    {region === r && <Check size={14} color={colors.primaryForeground} />}
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Sensitivity Level */}
+                    <View style={styles.prefCard}>
+                        <View style={styles.prefHeader}>
+                            <Text style={styles.prefTitle}>Sensitivity Level</Text>
+                            <Text style={styles.prefSubtitle}>Adjusts warning thresholds</Text>
+                        </View>
+                        <View style={styles.sensitivityContainer}>
+                            {[
+                                { key: 'standard', label: 'Standard', icon: 'check', desc: 'Balanced recommendations' },
+                                { key: 'cautious', label: 'Cautious', icon: 'alert', desc: 'More warnings shown' },
+                                { key: 'sensitive', label: 'Sensitive', icon: 'shield', desc: 'Strictest analysis' },
+                            ].map((s) => (
+                                <Pressable
+                                    key={s.key}
+                                    style={[styles.sensitivityOption, sensitivityLevel === s.key && styles.sensitivityOptionActive]}
+                                    onPress={() => setSensitivityLevel(s.key)}
+                                >
+                                    {s.icon === 'check' && <CheckCircle size={24} color={sensitivityLevel === s.key ? colors.primary : colors.mutedForeground} />}
+                                    {s.icon === 'alert' && <AlertTriangle size={24} color={sensitivityLevel === s.key ? colors.chart2 : colors.mutedForeground} />}
+                                    {s.icon === 'shield' && <ShieldCheck size={24} color={sensitivityLevel === s.key ? colors.chart3 : colors.mutedForeground} />}
+                                    <View style={styles.sensitivityInfo}>
+                                        <Text style={[styles.sensitivityLabel, sensitivityLevel === s.key && styles.sensitivityLabelActive]}>
+                                            {s.label}
+                                        </Text>
+                                        <Text style={styles.sensitivityDesc}>{s.desc}</Text>
+                                    </View>
+                                </Pressable>
+                            ))}
+                        </View>
+                    </View>
+
+                    {/* Skin Concerns */}
                     <View style={styles.prefCard}>
                         <View style={styles.prefHeader}>
                             <View>
@@ -567,34 +735,61 @@ export default function AddFamilyMember() {
                         </View>
                     </View>
 
+                    {/* Custom Preferences */}
                     <View style={styles.prefCard}>
                         <View style={styles.prefHeader}>
-                            <Text style={styles.prefTitle}>Sensitivity Level</Text>
-                            <Text style={styles.prefSubtitle}>Adjusts warning thresholds</Text>
+                            <View>
+                                <Text style={styles.prefTitle}>Custom Preferences</Text>
+                                <Text style={styles.prefSubtitle}>Add other ingredients to avoid</Text>
+                            </View>
                         </View>
-                        <View style={styles.sensitivityContainer}>
-                            {[
-                                { key: 'standard', label: 'Standard', icon: 'check', desc: 'Balanced recommendations' },
-                                { key: 'cautious', label: 'Cautious', icon: 'alert', desc: 'More warnings shown' },
-                                { key: 'sensitive', label: 'Sensitive', icon: 'shield', desc: 'Strictest analysis' },
-                            ].map((s) => (
+
+                        <View style={styles.inputGroup}>
+                            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                                <TextInput
+                                    style={[styles.input, { flex: 1 }]}
+                                    placeholder="E.g. Strawberry, Palm Oil..."
+                                    placeholderTextColor={colors.mutedForeground}
+                                    value={customAllergen}
+                                    onChangeText={setCustomAllergen}
+                                    onSubmitEditing={addCustomAllergen}
+                                    returnKeyType="done"
+                                />
                                 <Pressable
-                                    key={s.key}
-                                    style={[styles.sensitivityOption, sensitivityLevel === s.key && styles.sensitivityOptionActive]}
-                                    onPress={() => setSensitivityLevel(s.key)}
+                                    style={{
+                                        width: 56,
+                                        height: 56,
+                                        borderRadius: radius['2xl'],
+                                        backgroundColor: colors.primary,
+                                        alignItems: 'center',
+                                        justifyContent: 'center'
+                                    }}
+                                    onPress={addCustomAllergen}
                                 >
-                                    {s.icon === 'check' && <CheckCircle size={24} color={sensitivityLevel === s.key ? colors.primary : colors.mutedForeground} />}
-                                    {s.icon === 'alert' && <AlertTriangle size={24} color={sensitivityLevel === s.key ? colors.chart2 : colors.mutedForeground} />}
-                                    {s.icon === 'shield' && <ShieldCheck size={24} color={sensitivityLevel === s.key ? colors.chart3 : colors.mutedForeground} />}
-                                    <View style={styles.sensitivityInfo}>
-                                        <Text style={[styles.sensitivityLabel, sensitivityLevel === s.key && styles.sensitivityLabelActive]}>
-                                            {s.label}
-                                        </Text>
-                                        <Text style={styles.sensitivityDesc}>{s.desc}</Text>
-                                    </View>
+                                    <View style={{ width: 24, height: 2, backgroundColor: colors.primaryForeground, position: 'absolute' }} />
+                                    <View style={{ width: 2, height: 24, backgroundColor: colors.primaryForeground, position: 'absolute' }} />
                                 </Pressable>
-                            ))}
+                            </View>
                         </View>
+
+                        {allergens.filter(a => !['Nuts', 'Dairy', 'Gluten', 'Soy', 'Eggs', 'Fish'].includes(a)).length > 0 && (
+                            <View style={[styles.tagContainer, { marginTop: spacing[2] }]}>
+                                {allergens
+                                    .filter(a => !['Nuts', 'Dairy', 'Gluten', 'Soy', 'Eggs', 'Fish'].includes(a))
+                                    .map((allergen) => (
+                                        <Pressable
+                                            key={allergen}
+                                            style={[styles.tag, styles.tagActiveSpecial]}
+                                            onPress={() => toggleAllergy(allergen)}
+                                        >
+                                            <Text style={[styles.tagText, styles.tagTextActiveSpecial]}>
+                                                {allergen.charAt(0).toUpperCase() + allergen.slice(1)}
+                                            </Text>
+                                            <X size={14} color={colors.destructive} />
+                                        </Pressable>
+                                    ))}
+                            </View>
+                        )}
                     </View>
                 </ScrollView>
             )
@@ -802,8 +997,8 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
     },
     tagActive: {
-        backgroundColor: `${colors.chart3}1A`,
-        borderColor: `${colors.chart3}33`,
+        backgroundColor: colors.chart3,
+        borderColor: colors.chart3,
     },
     tagText: {
         fontSize: 12,
@@ -811,7 +1006,7 @@ const styles = StyleSheet.create({
         color: colors.primary,
     },
     tagTextActive: {
-        color: colors.chart3,
+        color: '#FFFFFF',
     },
     footer: {
         paddingHorizontal: spacing[6],
@@ -853,10 +1048,10 @@ const styles = StyleSheet.create({
     sensitivityLabelActive: { color: colors.primary },
     sensitivityDesc: { fontSize: 13, fontFamily: fonts.sans, color: colors.mutedForeground, marginTop: 2 },
 
-    tagActiveSpecial: { backgroundColor: `${colors.accent}20`, borderColor: colors.accent },
-    tagTextActiveSpecial: { color: colors.accent },
-    tagActiveAllergen: { backgroundColor: `${colors.destructive}15`, borderColor: colors.destructive },
-    tagTextActiveAllergen: { color: colors.destructive },
-    tagActiveSkin: { backgroundColor: `${colors.primary}15`, borderColor: colors.primary },
-    tagTextActiveSkin: { color: colors.primary },
+    tagActiveSpecial: { backgroundColor: colors.destructive, borderColor: colors.destructive },
+    tagTextActiveSpecial: { color: '#FFFFFF' },
+    tagActiveAllergen: { backgroundColor: colors.destructive, borderColor: colors.destructive },
+    tagTextActiveAllergen: { color: '#FFFFFF' },
+    tagActiveSkin: { backgroundColor: colors.primary, borderColor: colors.primary },
+    tagTextActiveSkin: { color: colors.primaryForeground },
 });

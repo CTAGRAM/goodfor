@@ -41,7 +41,7 @@ export async function getProductWithSafetyAnalysis(barcode, userProfile) {
     // Get user preferences
     const userPreferences = {
         allergies: userProfile?.allergies || [],
-        dietaryRestrictions: userProfile?.dietary_restrictions || [],
+        dietaryRestrictions: userProfile?.dietary_restrictions || userProfile?.dietary_preferences || [],
     };
 
     // Run safety analysis

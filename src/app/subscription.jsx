@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated, ScrollView } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -17,6 +18,7 @@ import {
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { useRevenueCat } from "@/contexts/RevenueCatContext";
+import { Redirect } from 'expo-router';
 
 export default function Subscription() {
     const insets = useSafeAreaInsets();
@@ -28,8 +30,8 @@ export default function Subscription() {
         return <SubscribedView insets={insets} router={router} customerInfo={customerInfo} />;
     }
 
-    // Otherwise show the upgrade view
-    return <UpgradeView insets={insets} router={router} />;
+    // Non-pro users go straight to the redesigned paywall
+    return <Redirect href="/paywall" />;
 }
 
 // Component for subscribed users
@@ -201,8 +203,10 @@ function UpgradeView({ insets, router }) {
         }
     ];
 
+    const [selectedPlan, setSelectedPlan] = useState('annual');
+
     const handleGoPro = () => {
-        router.push('/paywall');
+        router.push({ pathname: '/paywall', params: { plan: selectedPlan } });
     };
 
     return (
@@ -225,8 +229,12 @@ function UpgradeView({ insets, router }) {
                 <View style={{ width: 40 }} />
             </View>
 
-            {/* Main Content */}
-            <View style={styles.mainContent}>
+            {/* Scrollable Content */}
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={[styles.upgradeScrollContent, { paddingBottom: insets.bottom + 20 }]}
+                showsVerticalScrollIndicator={false}
+            >
                 {/* Title */}
                 <View style={styles.titleSection}>
                     <Text style={styles.title}>Upgrade for your family</Text>
@@ -250,23 +258,78 @@ function UpgradeView({ insets, router }) {
                     })}
                 </View>
 
-                {/* Annual Plan Card */}
-                <View style={styles.planCard}>
-                    <View style={styles.bestValueBadge}>
-                        <Text style={styles.bestValueText}>BEST VALUE</Text>
-                    </View>
-                    <View style={styles.planContent}>
-                        <View style={styles.planLeft}>
-                            <Text style={styles.planName}>Annual Plan</Text>
-                            <Text style={styles.planSubtitle}>Save 40% annually</Text>
+                {/* V6: Plan Toggle — Annual first (best value) */}
+                <View style={styles.planToggleContainer}>
+                    {/* Annual Plan */}
+                    <TouchableOpacity
+                        style={[
+                            styles.planOption,
+                            selectedPlan === 'annual' && styles.planOptionSelected,
+                        ]}
+                        onPress={() => setSelectedPlan('annual')}
+                        activeOpacity={0.8}
+                    >
+                        <View style={styles.planBestValue}>
+                            <Text style={styles.planBestValueText}>BEST VALUE — SAVE 33%</Text>
                         </View>
-                        <View style={styles.planRight}>
-                            <Text style={styles.planPrice}>£39.99</Text>
-                            <Text style={styles.planPeriod}>/ year</Text>
+                        <View style={styles.planOptionContent}>
+                            <View style={styles.planOptionLeft}>
+                                <View style={[
+                                    styles.planRadio,
+                                    selectedPlan === 'annual' && styles.planRadioSelected,
+                                ]} />
+                                <View>
+                                    <Text style={[
+                                        styles.planOptionName,
+                                        selectedPlan === 'annual' && styles.planOptionNameSelected,
+                                    ]}>Annual</Text>
+                                    <Text style={styles.planOptionSub}>£3.33/month equivalent</Text>
+                                </View>
+                            </View>
+                            <View style={styles.planOptionRight}>
+                                <Text style={[
+                                    styles.planOptionPrice,
+                                    selectedPlan === 'annual' && styles.planOptionPriceSelected,
+                                ]}>£39.99</Text>
+                                <Text style={styles.planOptionPeriod}>/ year</Text>
+                            </View>
                         </View>
-                    </View>
+                    </TouchableOpacity>
+
+                    {/* Monthly Plan */}
+                    <TouchableOpacity
+                        style={[
+                            styles.planOption,
+                            selectedPlan === 'monthly' && styles.planOptionSelected,
+                        ]}
+                        onPress={() => setSelectedPlan('monthly')}
+                        activeOpacity={0.8}
+                    >
+                        <View style={styles.planOptionContent}>
+                            <View style={styles.planOptionLeft}>
+                                <View style={[
+                                    styles.planRadio,
+                                    selectedPlan === 'monthly' && styles.planRadioSelected,
+                ]} />
+                                <View>
+                                    <Text style={[
+                                        styles.planOptionName,
+                                        selectedPlan === 'monthly' && styles.planOptionNameSelected,
+                                    ]}>Monthly</Text>
+                                    <Text style={styles.planOptionSub}>Cancel anytime</Text>
+                                </View>
+                            </View>
+                            <View style={styles.planOptionRight}>
+                                <Text style={[
+                                    styles.planOptionPrice,
+                                    selectedPlan === 'monthly' && styles.planOptionPriceSelected,
+                                ]}>£4.99</Text>
+                                <Text style={styles.planOptionPeriod}>/ month</Text>
+                            </View>
+                        </View>
+                    </TouchableOpacity>
                 </View>
-            </View>
+            </ScrollView>
 
             {/* Footer */}
             <View style={[styles.footer, { paddingBottom: insets.bottom + 20 }]}>
@@ -564,6 +627,9 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingHorizontal: spacing[5],
     },
+    upgradeScrollContent: {
+        paddingHorizontal: spacing[5],
+    },
     titleSection: {
         alignItems: 'center',
         marginTop: spacing[4],
@@ -610,6 +676,88 @@ const styles = StyleSheet.create({
         fontFamily: fonts.sans.regular,
         color: colors.mutedForeground,
         lineHeight: 18,
+    },
+    planToggleContainer: {
+        gap: spacing[3],
+        marginBottom: spacing[4],
+    },
+    planOption: {
+        backgroundColor: colors.card,
+        borderRadius: radius['2xl'],
+        padding: spacing[4],
+        borderWidth: 2,
+        borderColor: colors.border,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    planOptionSelected: {
+        borderColor: colors.primary,
+        backgroundColor: `${colors.accent}40`,
+    },
+    planOptionContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    planOptionLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: spacing[3],
+    },
+    planRadio: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        borderWidth: 2,
+        borderColor: colors.border,
+    },
+    planRadioSelected: {
+        borderWidth: 6,
+        borderColor: colors.primary,
+    },
+    planOptionName: {
+        fontSize: 16,
+        fontFamily: fonts.sans.bold,
+        color: colors.foreground,
+    },
+    planOptionNameSelected: {
+        color: colors.primary,
+    },
+    planOptionSub: {
+        fontSize: 12,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+        marginTop: 1,
+    },
+    planOptionRight: {
+        alignItems: 'flex-end',
+    },
+    planOptionPrice: {
+        fontSize: 20,
+        fontFamily: fonts.heading.bold,
+        color: colors.foreground,
+    },
+    planOptionPriceSelected: {
+        color: colors.primary,
+    },
+    planOptionPeriod: {
+        fontSize: 11,
+        fontFamily: fonts.sans.regular,
+        color: colors.mutedForeground,
+    },
+    planBestValue: {
+        backgroundColor: colors.chart1,
+        paddingHorizontal: spacing[3],
+        paddingVertical: 3,
+        alignSelf: 'flex-start',
+        borderRadius: radius.lg,
+        marginBottom: spacing[3],
+    },
+    planBestValueText: {
+        fontSize: 9,
+        fontFamily: fonts.sans.bold,
+        color: '#fff',
+        letterSpacing: 0.5,
     },
     planCard: {
         backgroundColor: colors.primary,

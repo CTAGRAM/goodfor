@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -12,8 +12,10 @@ import {
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
+import { useAlert } from "@/contexts/AlertContext";
 
 export default function DeleteAccount() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { profile } = useAuth();
@@ -43,7 +45,7 @@ export default function DeleteAccount() {
     const handleDeleteAccount = async () => {
         if (!canDelete) return;
 
-        Alert.alert(
+        showAlert(
             'Final Confirmation',
             'Are you absolutely sure you want to delete your account? This action is permanent and cannot be undone.',
             [
@@ -65,9 +67,9 @@ export default function DeleteAccount() {
                             await supabase.auth.signOut();
                             router.replace('/sign-in');
 
-                            Alert.alert('Account Deleted', 'Your account has been permanently deleted.');
+                            showAlert('Account Deleted', 'Your account has been permanently deleted.');
                         } catch (error) {
-                            Alert.alert('Error', 'Failed to delete account. Please try again or contact support.');
+                            showAlert('Error', 'Failed to delete account. Please try again or contact support.');
                             console.error('Delete account error:', error);
                         }
                     }

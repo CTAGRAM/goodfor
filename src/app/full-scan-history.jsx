@@ -1,12 +1,38 @@
-import { View, Text, Pressable, ScrollView, Image, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, Image, StyleSheet, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Search, Calendar, ChevronRight, CheckCircle, AlertTriangle, AlertCircle, Package } from 'lucide-react-native';
+import { ArrowLeft, Search, Calendar, ChevronRight, CheckCircle, AlertTriangle, AlertCircle, Package, ShoppingCart } from 'lucide-react-native';
 import { colors, fonts, fontSizes, spacing, radius } from '@/constants/theme';
 import { Badge } from '@/components/ui';
+import { useAuth } from '@/contexts/AuthContext';
+import { getOrCreateTodayBasket, addToBasket } from '@/lib/basketService';
+import { hapticMedium, hapticSuccess } from '@/lib/haptics';
 
 export default function FullScanHistory() {
     const router = useRouter();
+    const { user } = useAuth();
+
+    const handleAddToBasket = async (item) => {
+        hapticMedium();
+        try {
+            const basket = await getOrCreateTodayBasket(user?.id);
+            await addToBasket(basket.id, {
+                barcode: `HIST-${item.id}`,
+                name: item.name,
+                brand: '',
+                imageUrl: null,
+                safetyScore: item.safety === 'safe' ? 80 : item.safety === 'caution' ? 50 : 30,
+                safetyLevel: item.safety?.toUpperCase() || 'SAFE',
+            });
+            hapticSuccess();
+            Alert.alert('Added!', `${item.name} added to your basket.`, [
+                { text: 'View Basket', onPress: () => router.push('/basket') },
+                { text: 'OK' },
+            ]);
+        } catch (e) {
+            Alert.alert('Error', 'Could not add to basket');
+        }
+    };
 
     const historyData = {
         today: [
@@ -16,7 +42,7 @@ export default function FullScanHistory() {
                 time: '10:45 AM',
                 user: 'Sarah',
                 safety: 'safe',
-                safetyLabel: 'SAFE TO CONSUME',
+                safetyLabel: 'GOOD TO CONSUME',
             },
             {
                 id: 2,
@@ -24,7 +50,7 @@ export default function FullScanHistory() {
                 time: '09:15 AM',
                 user: 'Leo',
                 safety: 'safe',
-                safetyLabel: 'SAFE TO CONSUME',
+                safetyLabel: 'GOOD TO CONSUME',
             },
         ],
         yesterday: [
@@ -78,28 +104,35 @@ export default function FullScanHistory() {
         const safetyColor = getSafetyColor(item.safety);
 
         return (
-            <Pressable key={item.id} style={styles.historyItem}>
-                <View style={styles.historyItemContent}>
-                    <View style={styles.productIcon}>
-                        <Package size={32} color={colors.primary} />
-                    </View>
-                    <View style={styles.historyItemInfo}>
-                        <Text style={styles.productName}>{item.name}</Text>
-                        <Text style={styles.productMeta}>
-                            {item.time} • {item.user}
-                        </Text>
-                        <View style={styles.safetyBadgeContainer}>
-                            <View style={[styles.safetyBadge, { backgroundColor: `${safetyColor}1A`, borderColor: `${safetyColor}33` }]}>
-                                <SafetyIcon size={12} color={safetyColor} />
-                                <Text style={[styles.safetyBadgeText, { color: safetyColor }]}>
-                                    {item.safetyLabel}
-                                </Text>
+            <View key={item.id}>
+                <Pressable style={styles.historyItem}>
+                    <View style={styles.historyItemContent}>
+                        <View style={styles.productIcon}>
+                            <Package size={32} color={colors.primary} />
+                        </View>
+                        <View style={styles.historyItemInfo}>
+                            <Text style={styles.productName}>{item.name}</Text>
+                            <Text style={styles.productMeta}>
+                                {item.time} • {item.user}
+                            </Text>
+                            <View style={styles.safetyBadgeContainer}>
+                                <View style={[styles.safetyBadge, { backgroundColor: `${safetyColor}1A`, borderColor: `${safetyColor}33` }]}>
+                                    <SafetyIcon size={12} color={safetyColor} />
+                                    <Text style={[styles.safetyBadgeText, { color: safetyColor }]}>
+                                        {item.safetyLabel}
+                                    </Text>
+                                </View>
                             </View>
                         </View>
                     </View>
-                </View>
-                <ChevronRight size={20} color={`${colors.mutedForeground}80`} />
-            </Pressable>
+                    <ChevronRight size={20} color={`${colors.mutedForeground}80`} />
+                </Pressable>
+                {/* V8: Add to Basket */}
+                <Pressable style={styles.addBasketBtn} onPress={() => handleAddToBasket(item)}>
+                    <ShoppingCart size={14} color={colors.primary} />
+                    <Text style={styles.addBasketText}>+ Basket</Text>
+                </Pressable>
+            </View>
         );
     };
 
@@ -387,5 +420,23 @@ const styles = StyleSheet.create({
     safetyBadgeText: {
         fontSize: 10,
         fontFamily: fonts.sansBold,
+    },
+    addBasketBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 4,
+        paddingVertical: 8,
+        paddingHorizontal: spacing[4],
+        borderRadius: radius.full,
+        borderWidth: 1.5,
+        borderColor: `${colors.primary}40`,
+        backgroundColor: `${colors.primary}08`,
+        marginLeft: 'auto',
+    },
+    addBasketText: {
+        fontSize: 11,
+        fontFamily: fonts.sansBold,
+        color: colors.primary,
     },
 });

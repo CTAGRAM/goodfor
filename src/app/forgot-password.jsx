@@ -8,7 +8,7 @@ import {
     TextInput,
     KeyboardAvoidingView,
     Platform,
-    Alert,
+    
     ActivityIndicator
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -18,8 +18,10 @@ import { ArrowLeft, Mail, ArrowRight, CheckCircle } from "lucide-react-native";
 import { colors } from "@/constants/theme";
 import { supabase, sendOtpToEmail, verifyOtp } from "@/lib/supabaseAuth";
 import { fonts, radius } from "@/constants/theme";
+import { useAlert } from "@/contexts/AlertContext";
 
 export default function ForgotPassword() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
 
@@ -32,14 +34,14 @@ export default function ForgotPassword() {
         const trimmedEmail = email.trim();
 
         if (!trimmedEmail) {
-            Alert.alert("Error", "Please enter your email address");
+            showAlert("Error", "Please enter your email address");
             return;
         }
 
         // Basic email validation
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(trimmedEmail)) {
-            Alert.alert("Error", "Please enter a valid email address");
+            showAlert("Error", "Please enter a valid email address");
             return;
         }
 
@@ -50,7 +52,7 @@ export default function ForgotPassword() {
             setEmailSent(true);
         } catch (err) {
             console.error("Send OTP error:", err);
-            Alert.alert("Error", err.message || "Failed to send reset code. Please try again.");
+            showAlert("Error", err.message || "Failed to send reset code. Please try again.");
         } finally {
             setLoading(false);
         }
@@ -58,7 +60,7 @@ export default function ForgotPassword() {
 
     const handleVerifyCode = async () => {
         if (!code || code.length !== 6) {
-            Alert.alert("Error", "Please enter the 6-digit code");
+            showAlert("Error", "Please enter the 6-digit code");
             return;
         }
 
@@ -77,7 +79,7 @@ export default function ForgotPassword() {
             }
         } catch (err) {
             console.error("Verify OTP error:", err);
-            Alert.alert("Error", err.message || "Invalid code. Please try again.");
+            showAlert("Error", err.message || "Invalid code. Please try again.");
         } finally {
             setLoading(false);
         }

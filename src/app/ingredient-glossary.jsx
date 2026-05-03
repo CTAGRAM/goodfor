@@ -63,61 +63,158 @@ export default function IngredientGlossary() {
             .filter(i => i.length > 2 && i.length < 50);
 
         // Get user preferences for personalization
-        const userAllergies = profile?.allergies || [];
+        const userAllergies = (profile?.allergies || []).map(a => a.toLowerCase());
         const skinConcerns = profile?.skin_conditions || [];
         const dietaryPrefs = profile?.dietary_preferences || [];
+        const skinType = (profile?.skin_type || '').toLowerCase();
+        const isPregnant = profile?.is_pregnant || false;
+        const isBreastfeeding = profile?.is_breastfeeding || false;
+        const ageGroup = profile?.age_group || 'adult';
+        const cosmeticAllergens = (profile?.cosmetic_allergens || []).map(a => a.toLowerCase());
+        const sensitivityLevel = profile?.sensitivity_level || 'standard';
+        const isExtraCautious = sensitivityLevel === 'extra_cautious' || sensitivityLevel === 'very_sensitive';
 
-        return ingredientNames.slice(0, 10).map((name, index) => {
+        return ingredientNames.slice(0, 15).map((name, index) => {
             const lowerName = name.toLowerCase();
             let status = 'safe';
             let statusLabel = 'Generally safe';
             let forYouTag = null;
 
-            // Check for concerning ingredients
-            if (lowerName.includes('sugar') || lowerName.includes('syrup')) {
-                status = 'caution';
-                statusLabel = 'Needs caution';
-                if (dietaryPrefs.includes('Low Sugar')) {
-                    forYouTag = { text: 'Watch - Low Sugar Diet', color: colors.chart2, emoji: '' };
-                }
-            } else if (lowerName.includes('salt') || lowerName.includes('sodium')) {
-                status = 'caution';
-                statusLabel = 'Needs caution';
-                if (dietaryPrefs.includes('Low Sodium')) {
-                    forYouTag = { text: 'Watch - Low Sodium Diet', color: colors.chart2, emoji: '' };
-                }
-            } else if (lowerName.includes('color') || lowerName.includes('colour') || lowerName.match(/e\d{3}/)) {
-                status = 'caution';
-                statusLabel = 'Additive';
-            } else if (lowerName.includes('paraben') || lowerName.includes('sulfate')) {
-                status = 'caution';
-                statusLabel = 'Needs caution';
-            } else if (lowerName.includes('formaldehyde') || lowerName.includes('phthalate')) {
-                status = 'warning';
-                statusLabel = 'Avoid if possible';
-            }
-
-            // "For You" personalization - skin concerns
-            if (skinConcerns.length > 0) {
-                if (lowerName.includes('salicylic') && skinConcerns.includes('Acne')) {
-                    forYouTag = { text: 'Good for Acne', color: colors.chart1, emoji: '' };
-                } else if (lowerName.includes('niacinamide')) {
-                    forYouTag = { text: 'Multi-benefit Ingredient', color: colors.chart1, emoji: '' };
-                } else if (lowerName.includes('retinol') && skinConcerns.includes('Aging')) {
-                    forYouTag = { text: 'Good for Anti-aging', color: colors.chart1, emoji: '' };
-                } else if (lowerName.includes('fragrance') && skinConcerns.includes('Sensitive Skin')) {
-                    forYouTag = { text: 'May Irritate - Sensitive Skin', color: colors.chart3, emoji: '' };
-                }
-            }
-
-            // Check allergies
+            // === ALLERGEN CHECK (highest priority) ===
             for (const allergy of userAllergies) {
-                if (lowerName.includes(allergy.toLowerCase())) {
-                    forYouTag = { text: 'Your Allergen', color: colors.destructive, emoji: '' };
+                if (lowerName.includes(allergy)) {
+                    forYouTag = { text: '🚫 Your Allergen — Avoid', color: colors.destructive, emoji: '' };
                     status = 'warning';
                     statusLabel = 'Contains your allergen';
                     break;
                 }
+            }
+
+            // === COSMETIC ALLERGEN CHECK ===
+            if (!forYouTag) {
+                for (const cosmAllergy of cosmeticAllergens) {
+                    if (lowerName.includes(cosmAllergy)) {
+                        forYouTag = { text: '🚫 Cosmetic Allergen — Avoid', color: colors.destructive, emoji: '' };
+                        status = 'warning';
+                        statusLabel = 'Contains your cosmetic allergen';
+                        break;
+                    }
+                }
+            }
+
+            // === PREGNANCY / BREASTFEEDING WARNINGS ===
+            if (!forYouTag && (isPregnant || isBreastfeeding)) {
+                const pregnancyRisks = ['retinol', 'retinoid', 'retinoic', 'tretinoin', 'adapalene',
+                    'salicylic', 'benzoyl peroxide', 'hydroquinone', 'formaldehyde',
+                    'phthalate', 'oxybenzone', 'caffeine'];
+                if (pregnancyRisks.some(r => lowerName.includes(r))) {
+                    forYouTag = { text: `⚠️ Avoid during ${isPregnant ? 'pregnancy' : 'breastfeeding'}`, color: colors.chart3, emoji: '' };
+                    status = 'warning';
+                    statusLabel = `Avoid during ${isPregnant ? 'pregnancy' : 'breastfeeding'}`;
+                }
+            }
+
+            // === SKIN TYPE PERSONALIZATION ===
+            if (!forYouTag && skinType) {
+                // Dry skin
+                if (skinType === 'dry' || skinType === 'sensitive') {
+                    if (lowerName.includes('alcohol denat') || lowerName.includes('isopropyl alcohol') || lowerName.includes('ethanol')) {
+                        forYouTag = { text: `⚠️ May dry out ${skinType} skin`, color: colors.chart2, emoji: '' };
+                        status = 'caution';
+                    } else if (lowerName.includes('sulfate') || lowerName.includes('sls') || lowerName.includes('sles')) {
+                        forYouTag = { text: `⚠️ Harsh for ${skinType} skin`, color: colors.chart2, emoji: '' };
+                        status = 'caution';
+                    } else if (lowerName.includes('fragrance') || lowerName.includes('parfum')) {
+                        forYouTag = { text: '⚠️ May irritate sensitive skin', color: colors.chart2, emoji: '' };
+                        status = 'caution';
+                    } else if (lowerName.includes('glycerin') || lowerName.includes('hyaluronic') || lowerName.includes('shea') || lowerName.includes('ceramide')) {
+                        forYouTag = { text: `✅ Excellent for ${skinType} skin`, color: colors.chart1, emoji: '' };
+                    }
+                }
+                // Oily skin
+                if (skinType === 'oily' || skinType === 'combination') {
+                    if (lowerName.includes('coconut oil') || lowerName.includes('cocoa butter') || lowerName.includes('lanolin')) {
+                        forYouTag = { text: '⚠️ May clog pores (oily skin)', color: colors.chart2, emoji: '' };
+                        status = 'caution';
+                    } else if (lowerName.includes('niacinamide') || lowerName.includes('salicylic') || lowerName.includes('tea tree')) {
+                        forYouTag = { text: '✅ Great for oil control', color: colors.chart1, emoji: '' };
+                    }
+                }
+            }
+
+            // === SKIN CONCERN PERSONALIZATION ===
+            if (!forYouTag && skinConcerns.length > 0) {
+                if (lowerName.includes('salicylic') && skinConcerns.includes('Acne')) {
+                    forYouTag = { text: '✅ Targets acne', color: colors.chart1, emoji: '' };
+                } else if (lowerName.includes('niacinamide')) {
+                    forYouTag = { text: '✅ Multi-benefit for your skin', color: colors.chart1, emoji: '' };
+                } else if ((lowerName.includes('retinol') || lowerName.includes('peptide')) && skinConcerns.includes('Aging')) {
+                    forYouTag = { text: '✅ Anti-aging benefit', color: colors.chart1, emoji: '' };
+                } else if (lowerName.includes('vitamin c') && (skinConcerns.includes('Dark Spots') || skinConcerns.includes('Hyperpigmentation'))) {
+                    forYouTag = { text: '✅ Brightening for dark spots', color: colors.chart1, emoji: '' };
+                } else if (lowerName.includes('fragrance') && skinConcerns.includes('Eczema')) {
+                    forYouTag = { text: '⚠️ May worsen eczema', color: colors.chart3, emoji: '' };
+                    status = 'caution';
+                }
+            }
+
+            // === DIETARY PERSONALIZATION (food) ===
+            if (!forYouTag) {
+                if (lowerName.includes('sugar') || lowerName.includes('syrup') || lowerName.includes('dextrose') || lowerName.includes('fructose')) {
+                    status = 'caution';
+                    statusLabel = 'Added sugar';
+                    if (dietaryPrefs.some(d => d.toLowerCase().includes('sugar') || d.toLowerCase().includes('diabetic'))) {
+                        forYouTag = { text: '⚠️ Watch — sugar concern', color: colors.chart2, emoji: '' };
+                    }
+                } else if (lowerName.includes('salt') || lowerName.includes('sodium')) {
+                    status = 'caution';
+                    statusLabel = 'Contains sodium';
+                    if (dietaryPrefs.some(d => d.toLowerCase().includes('sodium') || d.toLowerCase().includes('blood pressure'))) {
+                        forYouTag = { text: '⚠️ Watch — sodium concern', color: colors.chart2, emoji: '' };
+                    }
+                } else if (lowerName.includes('gluten') || lowerName.includes('wheat') || lowerName.includes('flour') || lowerName.includes('barley') || lowerName.includes('rye')) {
+                    if (dietaryPrefs.some(d => d.toLowerCase().includes('gluten'))) {
+                        forYouTag = { text: '🚫 Contains gluten', color: colors.chart3, emoji: '' };
+                        status = 'warning';
+                        statusLabel = 'Contains gluten';
+                    }
+                } else if (lowerName.includes('milk') || lowerName.includes('whey') || lowerName.includes('casein') || lowerName.includes('lactose') || lowerName.includes('cream')) {
+                    if (dietaryPrefs.some(d => d.toLowerCase().includes('dairy') || d.toLowerCase().includes('lactose') || d.toLowerCase().includes('vegan'))) {
+                        forYouTag = { text: '⚠️ Dairy-derived ingredient', color: colors.chart2, emoji: '' };
+                        status = 'caution';
+                    }
+                } else if (lowerName.includes('gelatin')) {
+                    if (dietaryPrefs.some(d => d.toLowerCase().includes('vegetarian') || d.toLowerCase().includes('vegan') || d.toLowerCase().includes('halal'))) {
+                        forYouTag = { text: '🚫 Animal-derived (not suitable)', color: colors.chart3, emoji: '' };
+                        status = 'warning';
+                    }
+                }
+            }
+
+            // === GENERAL CAUTION INGREDIENTS ===
+            if (!forYouTag) {
+                if (lowerName.includes('color') || lowerName.includes('colour') || lowerName.match(/e\d{3}/)) {
+                    status = 'caution';
+                    statusLabel = 'Additive';
+                    if (ageGroup === 'child' || ageGroup === 'infant') {
+                        forYouTag = { text: '⚠️ Limit for children', color: colors.chart2, emoji: '' };
+                    }
+                } else if (lowerName.includes('paraben')) {
+                    status = 'caution';
+                    statusLabel = 'Preservative';
+                    if (isExtraCautious) {
+                        forYouTag = { text: '⚠️ Avoid — extra cautious mode', color: colors.chart2, emoji: '' };
+                    }
+                } else if (lowerName.includes('formaldehyde') || lowerName.includes('phthalate')) {
+                    status = 'warning';
+                    statusLabel = 'Avoid if possible';
+                    forYouTag = { text: '🚫 Best avoided', color: colors.chart3, emoji: '' };
+                }
+            }
+
+            // === DEFAULT POSITIVE TAG ===
+            if (!forYouTag && status === 'safe') {
+                forYouTag = { text: '✅ Safe for your profile', color: colors.chart1, emoji: '' };
             }
 
             return {

@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GoodFor – Your Weekly Safety Report</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #F2F5F3; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    .wrapper { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; }
+    .header { background: linear-gradient(135deg, #1A1A2E 0%, #16213E 100%); padding: 40px 32px; text-align: center; }
+    .header img { height: 40px; margin-bottom: 16px; }
+    .header h1 { color: #FFFFFF; font-size: 24px; margin: 0 0 8px; font-weight: 700; }
+    .header p { color: rgba(255,255,255,0.7); font-size: 14px; margin: 0; }
+    .content { padding: 32px; }
+    .greeting { font-size: 18px; color: #1A1A2E; font-weight: 600; margin-bottom: 8px; }
+    .intro { font-size: 14px; color: #6B7280; line-height: 1.6; margin-bottom: 24px; }
+    .stats-row { display: flex; gap: 12px; margin-bottom: 24px; }
+    .stat-card { flex: 1; background: #F8FAF9; border-radius: 12px; padding: 16px; text-align: center; border: 1px solid #E5E7EB; }
+    .stat-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+    .stat-label { font-size: 11px; color: #6B7280; text-transform: uppercase; letter-spacing: 1px; }
+    .safe-color { color: #22C55E; }
+    .review-color { color: #F59E0B; }
+    .score-color { color: #3B82F6; }
+    .section-title { font-size: 12px; color: #6B7280; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; margin-bottom: 12px; }
+    .tip-card { background: linear-gradient(135deg, #ECFDF5 0%, #F0FDF4 100%); border-radius: 12px; padding: 20px; margin-bottom: 24px; border-left: 4px solid #22C55E; }
+    .tip-title { font-size: 14px; font-weight: 700; color: #1A1A2E; margin-bottom: 6px; }
+    .tip-text { font-size: 13px; color: #4B5563; line-height: 1.5; }
+    .cta-button { display: block; background: #22C55E; color: #FFFFFF; text-decoration: none; text-align: center; padding: 14px 32px; border-radius: 12px; font-size: 16px; font-weight: 700; margin: 24px 0; }
+    .cta-button:hover { background: #16A34A; }
+    .divider { height: 1px; background: #E5E7EB; margin: 24px 0; }
+    .footer { padding: 24px 32px; background: #F8FAF9; text-align: center; }
+    .footer p { font-size: 12px; color: #9CA3AF; margin: 4px 0; line-height: 1.5; }
+    .footer a { color: #22C55E; text-decoration: none; }
+    .social-links { margin: 12px 0; }
+    .social-links a { color: #6B7280; text-decoration: none; font-size: 12px; margin: 0 8px; }
+    @media (max-width: 600px) {
+      .content { padding: 20px; }
+      .stats-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <!-- Header -->
+    <div class="header">
+      <h1>🛡️ GoodFor</h1>
+      <p>Your Weekly Safety Report</p>
+    </div>
+
+    <!-- Content -->
+    <div class="content">
+      <p class="greeting">Hi {{USER_NAME}},</p>
+      <p class="intro">
+        Here's your weekly product safety summary. You're making great progress 
+        towards healthier choices for your family!
+      </p>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value safe-color">{{SAFE_COUNT}}</div>
+          <div class="stat-label">Safe Products</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value review-color">{{REVIEW_COUNT}}</div>
+          <div class="stat-label">To Review</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value score-color">{{BASKET_SCORE}}</div>
+          <div class="stat-label">Basket Score</div>
+        </div>
+      </div>
+
+      <!-- Weekly Tip -->
+      <p class="section-title">💡 Weekly Tip</p>
+      <div class="tip-card">
+        <p class="tip-title">{{TIP_TITLE}}</p>
+        <p class="tip-text">{{TIP_TEXT}}</p>
+      </div>
+
+      <!-- CTA -->
+      <a href="goodfor://scan" class="cta-button">Open GoodFor & Scan</a>
+
+      <div class="divider"></div>
+
+      <!-- Streak -->
+      <p style="font-size: 14px; color: #1A1A2E; text-align: center;">
+        🔥 You're on a <strong>{{STREAK_WEEKS}}-week streak</strong> of healthier shopping!
+      </p>
+
+      <div class="divider"></div>
+
+      <!-- Recall Notice (conditional) -->
+      <!--
+      <p class="section-title">⚠️ New Recalls</p>
+      <p class="intro">
+        {{RECALL_COUNT}} new product recalls were reported this week. 
+        Open the app to check if any affect your scanned products.
+      </p>
+      -->
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="social-links">
+        <a href="https://goodfor.app">Website</a>
+        <a href="https://instagram.com/goodforapp">Instagram</a>
+        <a href="https://twitter.com/goodforapp">Twitter</a>
+      </div>
+      <p>
+        You're receiving this because you signed up for GoodFor.<br>
+        <a href="{{UNSUBSCRIBE_URL}}">Unsubscribe</a> · 
+        <a href="mailto:hello@goodfor.app">Contact us</a>
+      </p>
+      <p>© 2026 GoodFor. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

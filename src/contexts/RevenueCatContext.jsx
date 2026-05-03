@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import Purchases, { LOG_LEVEL } from 'react-native-purchases';
-import { Alert } from 'react-native';
+
 import { supabase } from '@/lib/supabaseAuth';
 import { useAuth } from './AuthContext';
 
@@ -191,7 +191,6 @@ export const RevenueCatProvider = ({ children }) => {
             }
 
             console.error('[RevenueCat] Purchase error:', error);
-            Alert.alert('Purchase Failed', error.message || 'An error occurred during purchase');
             return { success: false, error };
         }
     };
@@ -204,16 +203,15 @@ export const RevenueCatProvider = ({ children }) => {
             setIsLoading(false);
 
             if (customerInfo.entitlements.active['GoodFor Pro']) {
-                Alert.alert('Success', 'Your purchases have been restored!');
+                console.log('[RevenueCat] Purchases restored successfully');
             } else {
-                Alert.alert('No Purchases Found', 'We couldn\'t find any active subscriptions to restore.');
+                console.log('[RevenueCat] No active purchases found');
             }
 
             return customerInfo;
         } catch (error) {
             setIsLoading(false);
             console.error('[RevenueCat] Restore error:', error);
-            Alert.alert('Restore Failed', error.message || 'An error occurred while restoring purchases');
             throw error;
         }
     };
@@ -231,6 +229,7 @@ export const RevenueCatProvider = ({ children }) => {
         purchasePackage,
         restorePurchases,
         checkEntitlement,
+        loadOfferings,
         refreshCustomerInfo: async () => {
             try {
                 const info = await Purchases.getCustomerInfo();

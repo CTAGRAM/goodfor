@@ -11,6 +11,8 @@ import './src/__create/polyfills';
 global.Buffer = require('buffer').Buffer;
 
 import 'expo-router/entry';
+// Register Android home screen widget task handler
+import './src/widgets/widgetTaskHandler';
 import { App } from 'expo-router/build/qualified-entry';
 import type { ReactNode } from 'react';
 import { AppRegistry, LogBox } from 'react-native';

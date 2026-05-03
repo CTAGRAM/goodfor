@@ -2,6 +2,7 @@
 import { supabase } from './supabaseAuth';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const EDGE_FUNCTIONS_URL = `${SUPABASE_URL}/functions/v1`;
 
 // Request timeout in milliseconds - increased for cold starts and slow networks
@@ -19,6 +20,7 @@ async function callEdgeFunction(functionName, body = {}, options = {}) {
 
     const headers = {
         'Content-Type': 'application/json',
+        'apikey': SUPABASE_ANON_KEY,
     };
 
     if (session?.access_token) {

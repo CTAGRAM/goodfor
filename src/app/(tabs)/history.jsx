@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, TextInput, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Pressable, ActivityIndicator, TextInput, Image, Modal, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { BlurView } from 'expo-blur';
+import Animated, { FadeInRight, FadeOutRight, LinearTransition, useAnimatedStyle, withTiming, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
@@ -17,11 +19,13 @@ import {
   PackageOpen,
   Utensils,
   Sparkles,
-  Heart
+  Heart,
+  X,
 } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
+import { EmptyBoxAnimation } from '@/components/AnimatedEffects';
 
 export default function History() {
   const insets = useSafeAreaInsets();
@@ -31,16 +35,29 @@ export default function History() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  const [dateFilter, setDateFilter] = useState("all"); // all, today, week
+  const [dateFilter, setDateFilter] = useState("all"); // all, today, week, month, custom
+  const [customDate, setCustomDate] = useState(null); // For custom date filter
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [pickerMonth, setPickerMonth] = useState(new Date().getMonth());
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
   const [scanTypeFilter, setScanTypeFilter] = useState("all"); // all, food, beauty
   const [favoriteProductIds, setFavoriteProductIds] = useState(new Set());
+
+  const opacity = useSharedValue(0);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
 
   // Use useFocusEffect to reload scans every time the screen is focused
   useFocusEffect(
     useCallback(() => {
+      opacity.value = withTiming(1, { duration: 400 });
       if (profile) {
         loadScans();
       }
+      return () => {
+        opacity.value = 0;
+      };
     }, [profile, activeFamilyMember])
   );
 
@@ -135,6 +152,16 @@ export default function History() {
       const oneWeekAgo = new Date();
       oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
       if (new Date(scan.scanned_at) < oneWeekAgo) return false;
+    }
+    if (dateFilter === 'month') {
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+      if (new Date(scan.scanned_at) < oneMonthAgo) return false;
+    }
+    if (dateFilter === 'custom' && customDate) {
+      const scanDate = new Date(scan.scanned_at).toDateString();
+      const filterDate = new Date(customDate).toDateString();
+      if (scanDate !== filterDate) return false;
     }
 
     // Type filter - V4 improved beauty detection with false-positive prevention
@@ -290,7 +317,6 @@ export default function History() {
     }
   };
 
-  // Get relative time string like "Updated recently", "Updated 2 weeks ago"
   const getRelativeTime = (dateString) => {
     const now = new Date();
     const date = safeDate(dateString);
@@ -310,10 +336,24 @@ export default function History() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  const foodStyle = useAnimatedStyle(() => {
+    return {
+      backgroundColor: withTiming(scanTypeFilter === 'food' ? colors.primary : colors.card, { duration: 250 }),
+      borderColor: withTiming(scanTypeFilter === 'food' ? colors.primary : `${colors.border}40`, { duration: 250 }),
+    };
+  }, [scanTypeFilter]);
+
+  const beautyStyle = useAnimatedStyle(() => {
+    return {
+      backgroundColor: withTiming(scanTypeFilter === 'beauty' ? colors.primary : colors.card, { duration: 250 }),
+      borderColor: withTiming(scanTypeFilter === 'beauty' ? colors.primary : `${colors.border}40`, { duration: 250 }),
+    };
+  }, [scanTypeFilter]);
+
   const historyData = groupScansByDate(filteredScans);
 
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, animatedStyle]}>
       <StatusBar style="dark" />
 
       {/* Decorative Background Blurs */}
@@ -322,90 +362,117 @@ export default function History() {
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + 14 }]}>
-        <View style={styles.headerLeft}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <ArrowLeft size={24} color={colors.primary} />
-          </TouchableOpacity>
+        <Animated.View layout={LinearTransition.springify()} style={styles.headerLeft}>
+          <View style={styles.backButtonShadow}>
+            <TouchableOpacity style={styles.backButton} onPress={() => {
+              if (showSearch) {
+                setShowSearch(false);
+                setSearchQuery("");
+              } else {
+                router.back();
+              }
+            }}>
+              <BlurView intensity={80} tint="extraLight" style={styles.blurContainer}>
+                <ArrowLeft size={24} color={colors.primary} />
+              </BlurView>
+            </TouchableOpacity>
+          </View>
           {showSearch ? (
-            <TextInput
-              style={{ flex: 1, height: 40, backgroundColor: colors.card, borderRadius: 20, paddingHorizontal: 16, marginLeft: 12 }}
-              placeholder="Search scans..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoFocus
-            />
+            <Animated.View 
+              entering={FadeInRight.duration(300)} 
+              exiting={FadeOutRight.duration(200)}
+              style={{ flex: 1, flexDirection: 'row', alignItems: 'center', marginLeft: 12, backgroundColor: colors.card, borderRadius: 20, paddingHorizontal: 16, height: 40, borderWidth: 1, borderColor: colors.border }}
+            >
+              <Search size={16} color={colors.mutedForeground} />
+              <TextInput
+                style={{ flex: 1, height: 40, marginLeft: 8, fontSize: 14, fontFamily: fonts.sans, color: colors.foreground }}
+                placeholder="Search scans..."
+                placeholderTextColor={colors.mutedForeground}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                autoFocus
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity onPress={() => setSearchQuery("")}>
+                  <X size={16} color={colors.mutedForeground} />
+                </TouchableOpacity>
+              )}
+            </Animated.View>
           ) : (
-            <Text style={styles.headerTitle}>Scan History</Text>
+            <Animated.Text layout={LinearTransition} style={styles.headerTitle}>Scan History</Animated.Text>
           )}
-        </View>
-        <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.iconButton} onPress={() => {
-            setShowSearch(!showSearch);
-            if (showSearch) setSearchQuery("");
-          }}>
-            <Search size={20} color={showSearch ? colors.accent : colors.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton} onPress={() => {
-            // Cycle date filters: all -> today -> week -> all
-            if (dateFilter === 'all') setDateFilter('today');
-            else if (dateFilter === 'today') setDateFilter('week');
-            else setDateFilter('all');
-          }}>
-            <Calendar size={20} color={dateFilter !== 'all' ? colors.accent : colors.primary} />
-            {dateFilter !== 'all' && (
-              <View style={{ position: 'absolute', top: 8, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent }} />
-            )}
-          </TouchableOpacity>
-        </View>
+        </Animated.View>
+        {!showSearch && (
+          <Animated.View entering={FadeInRight} exiting={FadeOutRight} style={styles.headerRight}>
+            <TouchableOpacity style={styles.iconButton} onPress={() => setShowSearch(true)}>
+              <Search size={20} color={colors.primary} />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.iconButton} onPress={() => {
+              if (dateFilter === 'all') setDateFilter('today');
+              else if (dateFilter === 'today') setDateFilter('week');
+              else if (dateFilter === 'week') setDateFilter('month');
+              else if (dateFilter === 'month') {
+                setDateFilter('custom');
+                setShowDatePicker(true);
+              }
+              else setDateFilter('all');
+            }}>
+              <Calendar size={20} color={dateFilter !== 'all' ? colors.chart1 : colors.primary} />
+              {dateFilter !== 'all' && (
+                <View style={{ position: 'absolute', top: 8, right: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: colors.chart1 }} />
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+        )}
       </View>
+
+      {/* Active Date Filter Chip */}
+      {dateFilter !== 'all' && (
+        <View style={{ flexDirection: 'row', paddingHorizontal: spacing[6], paddingBottom: spacing[2] }}>
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: `${colors.chart1}15`,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+              borderRadius: radius.full,
+              borderWidth: 1,
+              borderColor: `${colors.chart1}30`,
+            }}
+            onPress={() => setDateFilter('all')}
+          >
+            <Calendar size={13} color={colors.chart1} />
+            <Text style={{ fontSize: 12, fontFamily: fonts.sansMedium, color: colors.chart1 }}>
+              {dateFilter === 'today' ? 'Today' : dateFilter === 'week' ? 'This Week' : dateFilter === 'month' ? 'This Month' : customDate ? new Date(customDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'Custom'}
+            </Text>
+            <X size={13} color={colors.chart1} />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Filter Toggles */}
       <View style={{ flexDirection: 'row', paddingHorizontal: spacing[6], paddingBottom: spacing[4], gap: spacing[3] }}>
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            paddingVertical: 10,
-            borderRadius: radius.xl,
-            backgroundColor: scanTypeFilter === 'food' ? colors.primary : colors.card,
-            borderWidth: 1,
-            borderColor: scanTypeFilter === 'food' ? colors.primary : `${colors.border}40`,
-          }}
+        <Pressable
+          style={{ flex: 1 }}
           onPress={() => setScanTypeFilter(prev => prev === 'food' ? 'all' : 'food')}
         >
-          <Utensils size={16} color={scanTypeFilter === 'food' ? colors.primaryForeground : colors.mutedForeground} />
-          <Text style={{
-            fontFamily: fonts.sans.bold,
-            fontSize: 13,
-            color: scanTypeFilter === 'food' ? colors.primaryForeground : colors.mutedForeground
-          }}>Food</Text>
-        </TouchableOpacity>
+          <Animated.View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: radius.xl, borderWidth: 1 }, foodStyle]}>
+            <Utensils size={16} color={scanTypeFilter === 'food' ? colors.primaryForeground : colors.mutedForeground} />
+            <Text style={{ fontFamily: fonts.sans.bold, fontSize: 13, color: scanTypeFilter === 'food' ? colors.primaryForeground : colors.mutedForeground }}>Food</Text>
+          </Animated.View>
+        </Pressable>
 
-        <TouchableOpacity
-          style={{
-            flex: 1,
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            paddingVertical: 10,
-            borderRadius: radius.xl,
-            backgroundColor: scanTypeFilter === 'beauty' ? colors.primary : colors.card,
-            borderWidth: 1,
-            borderColor: scanTypeFilter === 'beauty' ? colors.primary : `${colors.border}40`,
-          }}
+        <Pressable
+          style={{ flex: 1 }}
           onPress={() => setScanTypeFilter(prev => prev === 'beauty' ? 'all' : 'beauty')}
         >
-          <Sparkles size={16} color={scanTypeFilter === 'beauty' ? colors.primaryForeground : colors.mutedForeground} />
-          <Text style={{
-            fontFamily: fonts.sans.bold,
-            fontSize: 13,
-            color: scanTypeFilter === 'beauty' ? colors.primaryForeground : colors.mutedForeground
-          }}>Beauty</Text>
-        </TouchableOpacity>
+          <Animated.View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: radius.xl, borderWidth: 1 }, beautyStyle]}>
+            <Sparkles size={16} color={scanTypeFilter === 'beauty' ? colors.primaryForeground : colors.mutedForeground} />
+            <Text style={{ fontFamily: fonts.sans.bold, fontSize: 13, color: scanTypeFilter === 'beauty' ? colors.primaryForeground : colors.mutedForeground }}>Beauty</Text>
+          </Animated.View>
+        </Pressable>
       </View>
 
       {loading ? (
@@ -413,19 +480,13 @@ export default function History() {
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : scans.length === 0 ? (
-        // Empty state
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 }}>
-          <View style={{
-            width: 80,
-            height: 80,
-            borderRadius: 40,
-            backgroundColor: `${colors.accent}40`,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 24
-          }}>
-            <PackageOpen size={40} color={colors.mutedForeground} />
-          </View>
+          {/* Animated panda + empty box */}
+          <Image
+            source={require('../../../assets/images/panda-peek.png')}
+            style={{ width: 100, height: 60, resizeMode: 'contain', marginBottom: -8, zIndex: 1 }}
+          />
+          <EmptyBoxAnimation size={100} />
           <Text style={{
             fontSize: 24,
             fontFamily: fonts.heading.bold,
@@ -471,53 +532,99 @@ export default function History() {
                       ]}
                       onPress={() => handlePressItem(item)}
                     >
-                      <View style={styles.historyItemLeft}>
-                        {/* Adding Product Image to History Item as requested */}
-                        <View style={{ width: 40, height: 40, borderRadius: 8, overflow: 'hidden', marginRight: 12, backgroundColor: '#f0f0f0' }}>
-                          {item.product_image ? (
-                            <Image source={{ uri: item.product_image }} style={{ width: '100%', height: '100%' }} />
-                          ) : (
-                            <View style={[styles.iconContainer, { width: '100%', height: '100%', backgroundColor: `${safetyColor}20`, borderRadius: 0 }]}>
-                              <SafetyIcon size={20} color={safetyColor} />
-                            </View>
-                          )}
-                        </View>
-
-                        <View style={styles.historyItemInfo}>
-                          <Text style={styles.productName}>{item.product_name || 'Unknown Product'}</Text>
-                          <View style={styles.metaRow}>
-                            <Text style={styles.timeText}>{getRelativeTime(item.scanned_at)}</Text>
-                            {item.scan_count > 1 && (
-                              <Text style={[styles.timeText, { color: colors.primary }]}>
-                                {' '}• Scanned {item.scan_count}×
-                              </Text>
-                            )}
-                          </View>
-                        </View>
-                      </View>
-                      <View style={styles.historyItemRight}>
-                        {/* Favorite indicator */}
-                        {favoriteProductIds.has(item.product_id) && (
-                          <View style={styles.favoriteBadge}>
-                            <Heart size={14} color={colors.chart3} fill={colors.chart3} />
+                      {/* Column 1: Product Image */}
+                      <View style={{ width: 60, height: 60, borderRadius: 12, overflow: 'hidden', backgroundColor: '#fdfdfd', borderWidth: 1, borderColor: '#f0f0f0' }}>
+                        {item.product_image ? (
+                          <Image source={{ uri: item.product_image }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
+                        ) : (
+                          <View style={{ width: '100%', height: '100%', backgroundColor: `${safetyColor}10`, alignItems: 'center', justifyContent: 'center' }}>
+                            <PackageOpen size={24} color={safetyColor} />
                           </View>
                         )}
-                        <View
-                          style={[
-                            styles.safetyBadge,
-                            { backgroundColor: `${safetyColor}20` },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.safetyBadgeText,
-                              { color: safetyColor },
-                            ]}
-                          >
-                            {item.safety_label || item.safety_level?.toUpperCase()}
+                      </View>
+
+                      {/* Column 2: Details & Metadata Badges */}
+                      <View style={{ flex: 1, paddingHorizontal: 14, justifyContent: 'center' }}>
+                        
+                        {/* Name */}
+                        <Text style={[styles.productName, { fontSize: 16 }]} numberOfLines={1}>{item.product_name || 'Unknown Product'}</Text>
+                        
+                        {/* Brand & Date */}
+                        <Text style={[styles.productBrand, { marginTop: 1, fontSize: 13 }]} numberOfLines={1}>
+                          {item.product_brand ? `${item.product_brand} • ` : ''}{getRelativeTime(item.scanned_at)}
+                          {item.scan_count > 1 ? ` • ${item.scan_count}×` : ''}
+                        </Text>
+
+                        {/* Inline Badges (Nutri-Score & NOVA) properly nested below text */}
+                        {(() => {
+                          const sd = item.safety_details || {};
+                          const nutriGrade = sd.nutriScore?.grade || null;
+                          const novaGroup = sd.novaGroup?.group || null;
+                          if (!nutriGrade && !novaGroup) return null;
+                          return (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                              {nutriGrade && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <Text style={{ fontSize: 9, fontFamily: fonts.sansBold, color: colors.mutedForeground }}>NUTRI</Text>
+                                  <View style={{ flexDirection: 'row', gap: 1 }}>
+                                    {['a', 'b', 'c', 'd', 'e'].map(g => {
+                                      const gradeColors = { a: '#038141', b: '#85BB2F', c: '#FECB02', d: '#EE8100', e: '#E63E11' };
+                                      const isActive = g === nutriGrade.toLowerCase();
+                                      return (
+                                        <View key={g} style={{
+                                          width: isActive ? 13 : 9,
+                                          height: 13,
+                                          borderRadius: 2,
+                                          backgroundColor: isActive ? gradeColors[g] : `${gradeColors[g]}25`,
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                        }}>
+                                          <Text style={{
+                                            fontSize: isActive ? 8 : 1,
+                                            fontFamily: fonts.sansBold,
+                                            color: isActive ? '#FFF' : 'transparent',
+                                          }}>{isActive ? g.toUpperCase() : ''}</Text>
+                                        </View>
+                                      );
+                                    })}
+                                  </View>
+                                </View>
+                              )}
+                              
+                              {novaGroup && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <Text style={{ fontSize: 9, fontFamily: fonts.sansBold, color: colors.mutedForeground }}>NOVA</Text>
+                                  <View style={{
+                                    width: 14, height: 14, borderRadius: 3,
+                                    backgroundColor: novaGroup <= 1 ? '#038141' : novaGroup <= 2 ? '#85BB2F' : novaGroup <= 3 ? '#EE8100' : '#E63E11',
+                                    alignItems: 'center', justifyContent: 'center',
+                                  }}>
+                                    <Text style={{ fontSize: 9, fontFamily: fonts.sansBold, color: '#FFF' }}>{novaGroup}</Text>
+                                  </View>
+                                </View>
+                              )}
+                            </View>
+                          );
+                        })()}
+
+                      </View>
+
+                      {/* Column 3: The Primary Safety Verdict */}
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+                        {favoriteProductIds.has(item.product_id) && (
+                          <Heart size={16} color={colors.chart3} fill={colors.chart3} style={{ marginBottom: 2 }} />
+                        )}
+                        <View style={{ 
+                          flexDirection: 'row', alignItems: 'center', gap: 5,
+                          backgroundColor: `${safetyColor}12`,
+                          paddingHorizontal: 8, paddingVertical: 4,
+                          borderRadius: 8,
+                        }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: safetyColor }} />
+                          <Text style={{ fontSize: 13, fontFamily: fonts.sansBold, color: safetyColor }}>
+                            {item.safety_score ? `${item.safety_score} ` : ''}{item.safety_level === 'safe' ? 'SAFE' : (item.safety_label || item.safety_level?.toUpperCase())}
                           </Text>
                         </View>
-                        <ChevronRight size={20} color={colors.mutedForeground} />
                       </View>
                     </TouchableOpacity>
                   );
@@ -527,7 +634,117 @@ export default function History() {
           ))}
         </ScrollView>
       )}
-    </View>
+
+      {/* Custom Date Picker Modal */}
+      <Modal
+        visible={showDatePicker}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: colors.background, paddingTop: insets.top + 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 12 }}>
+            <Text style={{ fontSize: 20, fontFamily: fonts.heading, color: colors.foreground }}>Pick a Date</Text>
+            <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+              <X size={24} color={colors.foreground} />
+            </TouchableOpacity>
+          </View>
+          {(() => {
+            const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const daysInMonth = new Date(pickerYear, pickerMonth + 1, 0).getDate();
+            const firstDay = new Date(pickerYear, pickerMonth, 1).getDay();
+            const days = [];
+            for (let i = 0; i < firstDay; i++) days.push(null);
+            for (let i = 1; i <= daysInMonth; i++) days.push(i);
+            
+            const selectedDateStr = customDate ? new Date(customDate).toDateString() : null;
+            const todayStr = new Date().toDateString();
+
+            return (
+              <View style={{ paddingHorizontal: 20 }}>
+                {/* Month Nav */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <TouchableOpacity onPress={() => {
+                    if (pickerMonth === 0) { setPickerMonth(11); setPickerYear(pickerYear - 1); }
+                    else setPickerMonth(pickerMonth - 1);
+                  }} style={{ padding: 8 }}>
+                    <ArrowLeft size={20} color={colors.foreground} />
+                  </TouchableOpacity>
+                  <Text style={{ fontSize: 17, fontFamily: fonts.sansBold, color: colors.foreground }}>{monthNames[pickerMonth]} {pickerYear}</Text>
+                  <TouchableOpacity onPress={() => {
+                    if (pickerMonth === 11) { setPickerMonth(0); setPickerYear(pickerYear + 1); }
+                    else setPickerMonth(pickerMonth + 1);
+                  }} style={{ padding: 8 }}>
+                    <ChevronRight size={20} color={colors.foreground} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Day of Week Headers */}
+                <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+                  {['S','M','T','W','T','F','S'].map((d, i) => (
+                    <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+                      <Text style={{ fontSize: 12, fontFamily: fonts.sansBold, color: colors.mutedForeground }}>{d}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Calendar Grid */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+                  {days.map((day, i) => {
+                    if (day === null) return <View key={`empty-${i}`} style={{ width: '14.28%', height: 44 }} />;
+                    const thisDate = new Date(pickerYear, pickerMonth, day);
+                    const isSelected = thisDate.toDateString() === selectedDateStr;
+                    const isToday = thisDate.toDateString() === todayStr;
+                    const isFuture = thisDate > new Date();
+                    return (
+                      <TouchableOpacity
+                        key={day}
+                        disabled={isFuture}
+                        onPress={() => {
+                          setCustomDate(thisDate.toISOString());
+                          setDateFilter('custom');
+                          setShowDatePicker(false);
+                        }}
+                        style={{
+                          width: '14.28%', height: 44, alignItems: 'center', justifyContent: 'center',
+                        }}
+                      >
+                        <View style={{
+                          width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+                          backgroundColor: isSelected ? colors.primary : isToday ? `${colors.primary}15` : 'transparent',
+                        }}>
+                          <Text style={{
+                            fontSize: 15, fontFamily: isSelected || isToday ? fonts.sansBold : fonts.sans,
+                            color: isFuture ? `${colors.mutedForeground}40` : isSelected ? colors.primaryForeground : colors.foreground,
+                          }}>{day}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {/* Quick presets */}
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 20, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Today', fn: () => { setDateFilter('today'); setShowDatePicker(false); }},
+                    { label: 'This Week', fn: () => { setDateFilter('week'); setShowDatePicker(false); }},
+                    { label: 'This Month', fn: () => { setDateFilter('month'); setShowDatePicker(false); }},
+                    { label: 'All Time', fn: () => { setDateFilter('all'); setShowDatePicker(false); }},
+                  ].map(p => (
+                    <TouchableOpacity key={p.label} onPress={p.fn} style={{
+                      paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
+                      backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+                    }}>
+                      <Text style={{ fontSize: 13, fontFamily: fonts.sansMedium, color: colors.foreground }}>{p.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            );
+          })()}
+        </View>
+      </Modal>
+    </Animated.View>
   );
 }
 
@@ -569,22 +786,31 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   headerLeft: {
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing[3],
   },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: radius["2xl"],
-    backgroundColor: colors.card,
-    alignItems: "center",
-    justifyContent: "center",
+  backButtonShadow: {
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 2,
     elevation: 1,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: radius["2xl"],
+    overflow: "hidden",
+  },
+  blurContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.15)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.3)"
   },
   headerTitle: {
     fontSize: 20,
@@ -642,7 +868,7 @@ const styles = StyleSheet.create({
 
   historyItem: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     padding: spacing[4],
   },
@@ -667,10 +893,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   productName: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: fonts.sans.semiBold,
     color: colors.foreground,
-    marginBottom: 4,
+    marginBottom: 1,
+  },
+  productBrand: {
+    fontSize: 12,
+    fontFamily: fonts.sans.regular,
+    color: colors.mutedForeground,
+    marginBottom: 3,
   },
   metaRow: {
     flexDirection: "row",

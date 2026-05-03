@@ -70,36 +70,73 @@ export default function Alternatives() {
             }
 
             // FOOD PRODUCT: Log product data for debugging
+            const productCategories = product.categories || [];
             console.log('[Alternatives] Food product data:', {
                 barcode: product.barcode,
                 name: product.name,
-                categories: product.categories,
+                categories: productCategories,
                 category: product.category || product.safetyAnalysis?.category,
                 nutriScore: product.nutriScore || product.safetyAnalysis?.nutriScore?.grade,
             });
 
-            // Try Edge Function first
-            try {
-                alts = await getAlternativesEdge(product);
-                console.log('[Alternatives] Got', alts.length, 'alternatives from Edge Function');
-            } catch (edgeError) {
-                console.log('[Alternatives] Edge Function failed:', edgeError.message);
-            }
+            // Helper: validate that an alternative is related to the scanned product
+            // This prevents unrelated products (e.g., water for dates) from appearing
+            const productNameKeywords = (product.name || '')
+                .toLowerCase()
+                .replace(/[^a-z\s]/g, '')
+                .split(/\s+/)
+                .filter(w => w.length > 3 && !['with', 'and', 'the', 'for', 'from', 'pack', 'size',
+                    'premium', 'original', 'classic', 'natural'].includes(w));
 
-            // Fallback to OpenFoodFacts direct API if edge function returns empty
-            if (alts.length === 0) {
-                console.log('[Alternatives] Using OpenFoodFacts fallback for:', product.name);
-                console.log('[Alternatives] Fallback categories:', product.categories);
+            const isRelevantAlternative = (alt) => {
+                if (productCategories.length === 0) return true; // no categories to filter, accept all
+                const altCategories = alt.categories_tags || alt.categories || [];
+
+                // V7: When alt has NO categories, check name relevance instead of blind accept
+                if (altCategories.length === 0) {
+                    if (productNameKeywords.length === 0) return true; // can't validate, accept
+                    const altName = (alt.name || alt.product_name || '').toLowerCase();
+                    return productNameKeywords.some(word => altName.includes(word));
+                }
+
+                // Use the most specific categories (last 3) for comparison
+                const specificCats = productCategories.length > 3
+                    ? productCategories.slice(-3)
+                    : productCategories;
+
+                const categoryMatch = specificCats.some(cat => altCategories.includes(cat));
+
+                // If broad categories only, also verify name relevance
+                if (productCategories.length <= 2 && categoryMatch) {
+                    // Broad category match (e.g., both share "plant-based-foods") — check name too
+                    if (productNameKeywords.length > 0) {
+                        const altName = (alt.name || alt.product_name || '').toLowerCase();
+                        const altCatString = altCategories.join(' ').toLowerCase();
+                        const nameMatch = productNameKeywords.some(word =>
+                            altName.includes(word) || altCatString.includes(word)
+                        );
+                        return nameMatch;
+                    }
+                }
+
+                return categoryMatch;
+            };
+
+            // ──── STRATEGY 1: OpenFoodFacts local (fast, category-filtered) ────
+            console.log('[Alternatives] Strategy 1: OpenFoodFacts local for:', product.name);
+            console.log('[Alternatives] Product categories:', productCategories);
+            try {
                 alts = await getAlternativesLocal(product, 5, { country: profile?.region || 'US' });
                 console.log('[Alternatives] Got', alts.length, 'alternatives from OpenFoodFacts');
+            } catch (localError) {
+                console.log('[Alternatives] OpenFoodFacts failed:', localError.message);
+            }
 
-                // Map OpenFoodFacts format to display format with better scoring
+            // Map OpenFoodFacts format to display format
+            if (alts.length > 0) {
                 const mapped = alts.map((alt, index) => {
-                    // Calculate score based on nutriscore grade
                     const nutriScoreMap = { 'a': 95, 'b': 85, 'c': 70, 'd': 55, 'e': 40 };
                     const baseScore = nutriScoreMap[alt.nutriScore?.toLowerCase()] || 65;
-
-                    // Adjust for additives (fewer is better)
                     const additiveBonus = Math.max(0, 5 - (alt.additives?.length || 0));
 
                     return {
@@ -119,22 +156,41 @@ export default function Alternatives() {
                 return;
             }
 
-            // Map Edge Function format with improved badges
-            const mapped = alts.map((alt, index) => ({
-                barcode: alt.barcode,
-                name: alt.name,
-                brand: alt.brand,
-                imageUrl: alt.imageUrl,
-                score: alt.safetyScore || alt.safety_score || 75,
-                nutriScore: alt.nutriScore || alt.nutri_score,
-                badge: index === 0 ? 'Top Match' :
-                    alt.safetyLevel === 'safe' || alt.safety_level === 'safe' ? 'Safe Choice' :
-                        (alt.nutriScore === 'a' || alt.nutriScore === 'b') ? 'Healthy Choice' :
-                            'Alternative',
-                reasons: alt.reasons || [alt.reason || alt.improvement || 'Better nutritional profile'],
-            }));
+            // ──── STRATEGY 2: Edge Function fallback (only if local returned nothing) ────
+            console.log('[Alternatives] Strategy 2: Edge Function fallback...');
+            try {
+                const edgeAlts = await getAlternativesEdge(product);
+                console.log('[Alternatives] Got', edgeAlts.length, 'raw alternatives from Edge Function');
 
-            setAlternatives(mapped);
+                // CRITICAL: Filter edge function results by category relevance
+                // The edge function often returns unrelated products (water for dates, coke for biscuits)
+                const filteredAlts = edgeAlts.filter(alt => isRelevantAlternative(alt));
+                console.log('[Alternatives] After category filter:', filteredAlts.length, 'relevant alternatives');
+
+                if (filteredAlts.length > 0) {
+                    const mapped = filteredAlts.slice(0, 5).map((alt, index) => ({
+                        barcode: alt.barcode,
+                        name: alt.name,
+                        brand: alt.brand,
+                        imageUrl: alt.imageUrl,
+                        score: alt.safetyScore || alt.safety_score || 75,
+                        nutriScore: alt.nutriScore || alt.nutri_score,
+                        badge: index === 0 ? 'Top Match' :
+                            alt.safetyLevel === 'safe' || alt.safety_level === 'safe' ? 'Safe Choice' :
+                                (alt.nutriScore === 'a' || alt.nutriScore === 'b') ? 'Healthy Choice' :
+                                    'Alternative',
+                        reasons: alt.reasons || [alt.reason || alt.improvement || 'Better nutritional profile'],
+                    }));
+                    setAlternatives(mapped);
+                    return;
+                }
+            } catch (edgeError) {
+                console.log('[Alternatives] Edge Function failed:', edgeError.message);
+            }
+
+            // No alternatives found from either source
+            console.log('[Alternatives] No relevant alternatives found from any source');
+            setAlternatives([]);
         } catch (error) {
             console.error('[Alternatives] Failed to load:', error);
             setAlternatives([]);
@@ -189,43 +245,64 @@ export default function Alternatives() {
         const altNutri = altProduct.nutriScore?.toLowerCase() || 'z';
         const origNutri = originalProduct.nutriScore?.toLowerCase() || originalProduct.safetyAnalysis?.nutriScore?.grade?.toLowerCase() || 'z';
         if (altNutri < origNutri) {
-            reasons.push('Better Nutri-Score grade');
+            const gradeLabels = { a: 'A (Excellent)', b: 'B (Good)', c: 'C (Fair)', d: 'D (Poor)', e: 'E (Bad)' };
+            reasons.push(`Nutri-Score ${gradeLabels[altNutri] || altNutri.toUpperCase()} vs ${origNutri.toUpperCase()}`);
         }
 
-        // Check additives
+        // Check additives — show specific reduction
         const altAdditives = altProduct.additives?.length || 0;
         const origAdditives = originalProduct.additives?.length || 999;
         if (altAdditives < origAdditives && origAdditives !== 999) {
-            reasons.push('Fewer additives');
+            const diff = origAdditives - altAdditives;
+            reasons.push(altAdditives === 0 ? 'No additives' : `${diff} fewer additives`);
         }
 
-        // Check sugars
+        // Check sugars — show percentage reduction
         const altSugars = altProduct.nutriments?.sugars || 0;
         const origSugars = originalProduct.nutriments?.sugars || 999;
         if (altSugars < origSugars && origSugars !== 999) {
-            if (altSugars < origSugars * 0.7) {
+            const reduction = Math.round(((origSugars - altSugars) / origSugars) * 100);
+            if (reduction >= 50) {
+                reasons.push(`${reduction}% less sugar`);
+            } else if (altSugars < origSugars * 0.7) {
                 reasons.push('Significantly lower sugar');
             } else {
                 reasons.push('Lower sugar content');
             }
         }
 
-        // Check sodium
+        // Check sodium — show percentage
         const altSodium = altProduct.nutriments?.sodium || 0;
         const origSodium = originalProduct.nutriments?.sodium || 999;
         if (altSodium < origSodium && origSodium !== 999) {
-            reasons.push('Lower sodium content');
+            const reduction = Math.round(((origSodium - altSodium) / origSodium) * 100);
+            reasons.push(reduction >= 30 ? `${reduction}% less sodium` : 'Lower sodium content');
         }
 
         // Check NOVA group (1-4, lower is less processed)
         const altNova = altProduct.novaGroup || 5;
         const origNova = originalProduct.novaGroup || 5;
         if (altNova < origNova && origNova !== 5) {
-            reasons.push('Less processed');
+            const novaLabels = { 1: 'unprocessed', 2: 'minimally processed', 3: 'processed', 4: 'ultra-processed' };
+            reasons.push(`${novaLabels[altNova] || 'Less processed'} food (NOVA ${altNova})`);
         }
 
-        // Add positive attributes if we don't have enough reasons yet
+        // Additional positive attributes
         if (reasons.length < 2) {
+            // Higher fiber
+            const altFiber = altProduct.nutriments?.fiber || 0;
+            const origFiber = originalProduct.nutriments?.fiber || 0;
+            if (altFiber > origFiber && altFiber > 2) {
+                reasons.push(`Higher fiber (${altFiber.toFixed(1)}g)`);
+            }
+
+            // Higher protein
+            const altProtein = altProduct.nutriments?.proteins || 0;
+            const origProtein = originalProduct.nutriments?.proteins || 0;
+            if (altProtein > origProtein && altProtein > 3) {
+                reasons.push(`More protein (${altProtein.toFixed(1)}g)`);
+            }
+
             if (altProduct.nutriScore === 'a') {
                 reasons.push('Excellent nutritional profile');
             } else if (altProduct.nutriScore === 'b') {
@@ -241,7 +318,7 @@ export default function Alternatives() {
             reasons.push('Better alternative in category');
         }
 
-        return reasons.slice(0, 2);
+        return reasons.slice(0, 3); // Show up to 3 reasons now
     }
 
     return (
@@ -274,6 +351,51 @@ export default function Alternatives() {
                         We found these top-rated options that match your family's health profile perfectly.
                     </Text>
                 </View>
+
+                {/* Original Product Card — shows what you scanned */}
+                {product.name && (
+                    <View style={{
+                        backgroundColor: `${colors.chart3}08`,
+                        borderRadius: 16,
+                        padding: 14,
+                        marginBottom: 16,
+                        borderWidth: 1,
+                        borderColor: `${colors.chart3}20`,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 12,
+                    }}>
+                        <View style={{
+                            width: 44, height: 44, borderRadius: 10, overflow: 'hidden',
+                            backgroundColor: `${colors.chart3}15`, alignItems: 'center', justifyContent: 'center',
+                        }}>
+                            {product.imageUrl ? (
+                                <Image source={{ uri: product.imageUrl }} style={{ width: '100%', height: '100%' }} />
+                            ) : (
+                                <Text style={{ fontSize: 10, color: colors.mutedForeground }}>SCANNED</Text>
+                            )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 10, fontFamily: fonts.sans?.bold || fonts.sansBold, color: colors.chart3, letterSpacing: 1, marginBottom: 2 }}>
+                                YOU SCANNED
+                            </Text>
+                            <Text style={{ fontSize: 14, fontFamily: fonts.sans?.semiBold || fonts.sansSemiBold, color: colors.foreground }} numberOfLines={1}>
+                                {product.name}
+                            </Text>
+                            {product.brand && (
+                                <Text style={{ fontSize: 11, color: colors.mutedForeground }}>{product.brand}</Text>
+                            )}
+                        </View>
+                        <View style={{
+                            backgroundColor: `${colors.chart3}15`,
+                            borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4,
+                        }}>
+                            <Text style={{ fontSize: 14, fontFamily: fonts.sans?.bold || fonts.sansBold, color: colors.chart3 }}>
+                                {product.safetyAnalysis?.safeScore || product.safetyScore || '—'}
+                            </Text>
+                        </View>
+                    </View>
+                )}
 
                 {/* Alternatives List */}
                 <View style={styles.alternativesList}>

@@ -14,10 +14,22 @@ import {
   Edit2,
   UserCheck,
   X,
+  Bell,
+  ChevronRight,
+  ShieldCheck,
+  ShoppingCart,
+  Tag,
+  PackageOpen,
 } from "lucide-react-native";
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { colors } from "@/constants/theme";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
+import { fetchAllRecalls } from "@/lib/recallService";
+import { getOrCreateTodayBasket, getStreak, getScoreColor } from '@/lib/basketService';
+import { scheduleShoppingReminder, requestNotificationPermission } from '@/lib/notificationService';
+import { updateWidgetData } from '@/widgets/widgetSync';
+import { StreakFlame } from '@/components/AnimatedEffects';
 
 export default function Home() {
   const insets = useSafeAreaInsets();
@@ -30,22 +42,57 @@ export default function Home() {
   const [stats, setStats] = useState({ safe: 0, review: 0 });
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedMember, setSelectedMember] = useState(null);
+  const [recallCount, setRecallCount] = useState(0);
+  const [basketData, setBasketData] = useState(null);
+  const [streakData, setStreakData] = useState(null);
 
   useEffect(() => {
     if (profile) {
       loadFamilyMembers();
       loadRecentScans();
+      // V5: Load recall alert count
+      fetchAllRecalls().then(recalls => setRecallCount(recalls?.length || 0)).catch(() => { });
+      // V8: Request permissions and schedule shopping reminders
+      requestNotificationPermission().then(granted => {
+        if (granted) scheduleShoppingReminder().catch(() => {});
+      });
     }
   }, [profile]);
 
+  const opacity = useSharedValue(0);
+
   useFocusEffect(
     useCallback(() => {
+      opacity.value = withTiming(1, { duration: 400 });
       if (profile) {
         loadFamilyMembers();
         loadRecentScans();
+        // V8: Load basket data
+        loadBasketData();
       }
+      return () => {
+        opacity.value = 0;
+      };
     }, [profile])
   );
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  const loadBasketData = async () => {
+    try {
+      const [basket, streak] = await Promise.all([
+        getOrCreateTodayBasket(profile?.id),
+        getStreak(profile?.id),
+      ]);
+      setBasketData(basket);
+      setStreakData(streak);
+    } catch (e) {
+      // Basket tables might not exist yet, fail silently
+      console.log('[Home] Basket load error (tables may not exist):', e.message);
+    }
+  };
 
   const loadFamilyMembers = async () => {
     try {
@@ -125,6 +172,17 @@ export default function Home() {
 
       setStats({ safe: safeCount, review: reviewCount });
 
+      // Sync data to home screen widget
+      updateWidgetData({
+        safeCount,
+        reviewCount,
+        basketScore: streakData?.current_score || 0,
+        recentProducts: formatted.slice(0, 3).map(s => ({
+          name: s.product_name || 'Unknown',
+          safety: s.safety_level || 'caution',
+        })),
+      });
+
     } catch (err) {
       console.error('[Home] Error loading scans:', err);
     } finally {
@@ -176,10 +234,13 @@ export default function Home() {
   const handleEditProfile = () => {
     setModalVisible(false);
     if (selectedMember) {
+      console.log('[Home] handleEditProfile selectedMember:', selectedMember);
       // V4 FIX: Route main user to edit-profile, family members to add-family-member
       if (selectedMember.isMain) {
+        console.log('[Home] Routing to edit-profile (Main)');
         router.push('/edit-profile');
       } else {
+        console.log('[Home] Routing to add-family-member with ID:', selectedMember.id);
         router.push({
           pathname: '/add-family-member',
           params: { memberId: selectedMember.id }
@@ -197,7 +258,7 @@ export default function Home() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <Animated.View style={[{ flex: 1, backgroundColor: colors.background }, animatedStyle]}>
       <StatusBar style="dark" />
 
       {/* Background blurs */}
@@ -328,6 +389,81 @@ export default function Home() {
             {displayProfile.name}
           </Text>
         </View>
+
+        {/* V8: Smart Basket Card — with live data (top of hierarchy) */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push('/basket')}
+          style={{
+            backgroundColor: colors.card,
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 16,
+            borderWidth: 1.5,
+            borderColor: `${colors.primary}20`,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{
+              width: 44, height: 44, borderRadius: 22,
+              backgroundColor: colors.primary,
+              alignItems: 'center', justifyContent: 'center', marginRight: 14,
+            }}>
+              <ShoppingCart size={20} color={colors.primaryForeground} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontFamily: 'Rubik_700Bold', color: colors.foreground }}>
+                Smart Basket
+              </Text>
+              <Text style={{ fontSize: 12, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground, marginTop: 1 }}>
+                {basketData?.basket_items?.length > 0
+                  ? `${basketData.basket_items.length} items today`
+                  : 'Build your basket & track your score'}
+              </Text>
+            </View>
+            {basketData?.score > 0 ? (
+              <View style={{
+                backgroundColor: `${getScoreColor(basketData.score)}15`,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+                alignItems: 'center',
+              }}>
+                <Text style={{ fontSize: 18, fontFamily: 'Rubik_700Bold', color: getScoreColor(basketData.score) }}>
+                  {basketData.score}
+                </Text>
+                <Text style={{ fontSize: 9, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground }}>/100</Text>
+              </View>
+            ) : (
+              <View style={{
+                backgroundColor: colors.primary,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                paddingVertical: 6,
+              }}>
+                <Text style={{ fontSize: 11, fontFamily: 'Rubik_600SemiBold', color: '#FFF' }}>
+                  Start →
+                </Text>
+              </View>
+            )}
+          </View>
+          {/* Streak badge */}
+          {streakData?.current_streak > 0 && (
+            <View style={{
+              flexDirection: 'row', alignItems: 'center', gap: 6,
+              marginTop: 10, paddingTop: 10,
+              borderTopWidth: 1, borderTopColor: `${colors.border}30`,
+            }}>
+              <StreakFlame size={22} />
+              <Text style={{ fontSize: 12, fontFamily: 'Rubik_600SemiBold', color: colors.foreground }}>
+                {streakData.current_streak} week streak
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground }}>
+                • Avg {streakData.average_score}/100
+              </Text>
+            </View>
+          )}
+        </TouchableOpacity>
 
         {/* Active Profiles Card */}
         <View
@@ -599,35 +735,149 @@ export default function Home() {
                     borderRadius: 16,
                     gap: 12
                   }}
-                  onPress={() => router.push("/history")}
+                  onPress={() => {
+                      const products = scan.products || {};
+                      const ingredients = products.ingredients || {};
+                      const nutritionFacts = products.nutrition_facts || {};
+                      const safetyDetails = scan.safety_details || {};
+                      
+                      const productSummaryData = {
+                          barcode: scan.barcode || products.barcode || '',
+                          name: products.name || scan.product_name || 'Unknown',
+                          brand: products.brand || scan.product_brand || '',
+                          imageUrl: products.image_url || scan.product_image || null,
+                          ingredientsText: ingredients.text || '',
+                          allergens: ingredients.allergens || [],
+                          additives: ingredients.additives || [],
+                          traces: ingredients.traces || [],
+                          nutriments: {
+                              energy_kcal: nutritionFacts.energy_kcal || 0,
+                              sugars: nutritionFacts.sugars || 0,
+                              sodium: nutritionFacts.sodium || 0,
+                              salt: nutritionFacts.salt || 0,
+                              saturated_fat: nutritionFacts.saturated_fat || nutritionFacts['saturated-fat'] || 0,
+                              proteins: nutritionFacts.proteins || 0,
+                              fiber: nutritionFacts.fiber || 0,
+                              caffeine: nutritionFacts.caffeine || 0,
+                          },
+                          categories: products.category ? [products.category] : [],
+                          safetyAnalysis: {
+                              safety: scan.safety_level || 'safe',
+                              safeScore: scan.safety_score || 50,
+                              issues: safetyDetails.issues || [],
+                              ageGroup: safetyDetails.ageGroup,
+                              ageAppropriate: safetyDetails.ageAppropriate !== false,
+                              nutriScore: safetyDetails.nutriScore || null,
+                              hasPersonalAllergenMatch: (safetyDetails.issues || []).some(i => i.type === 'personal_allergen'),
+                          },
+                          nutriScore: safetyDetails.nutriScore?.grade || null,
+                          novaGroup: safetyDetails.novaGroup?.group || null,
+                          ecoScore: safetyDetails.ecoScore?.grade || null,
+                      };
+                      
+                      router.push({
+                        pathname: '/product-summary',
+                        params: { productData: JSON.stringify(productSummaryData) }
+                      });
+                  }}
                 >
-                  <View style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 8,
-                    backgroundColor: colors.border,
-                    overflow: 'hidden'
-                  }}>
+                  {/* Column 1: Product Image */}
+                  <View style={{ width: 60, height: 60, borderRadius: 12, overflow: 'hidden', backgroundColor: '#fdfdfd', borderWidth: 1, borderColor: '#f0f0f0' }}>
                     {scan.product_image ? (
-                      <Image source={{ uri: scan.product_image }} style={{ width: '100%', height: '100%' }} />
+                      <Image source={{ uri: scan.product_image }} style={{ width: '100%', height: '100%', resizeMode: 'cover' }} />
                     ) : (
-                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                        <Info size={20} color={colors.mutedForeground} />
+                      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: `${scan.safety_level === 'safe' ? colors.chart1 : colors.mutedForeground}10` }}>
+                        <PackageOpen size={24} color={scan.safety_level === 'safe' ? colors.chart1 : colors.mutedForeground} />
                       </View>
                     )}
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 14, fontFamily: 'Rubik_600SemiBold', color: colors.foreground }} numberOfLines={1}>
+
+                  {/* Column 2: Details & Metadata Badges */}
+                  <View style={{ flex: 1, paddingHorizontal: 14, justifyContent: 'center' }}>
+                    
+                    {/* Name */}
+                    <Text style={{ fontSize: 16, fontFamily: 'Rubik_600SemiBold', color: colors.foreground }} numberOfLines={1}>
                       {scan.product_name || 'Unknown Product'}
                     </Text>
-                    <Text style={{ fontSize: 12, color: colors.mutedForeground }}>
-                      {new Date(scan.scanned_at).toLocaleDateString()} • {scan.safety_level?.toUpperCase()}
+                    
+                    {/* Brand & Date */}
+                    <Text style={{ fontSize: 13, color: colors.mutedForeground, marginTop: 1 }} numberOfLines={1}>
+                      {scan.product_brand ? `${scan.product_brand} • ` : ''}{new Date(scan.scanned_at).toLocaleDateString()}
                     </Text>
+
+                    {/* Inline Badges (Nutri-Score & NOVA) properly nested below text */}
+                    {(() => {
+                      const sd = scan.safety_details || {};
+                      const nutriGrade = sd.nutriScore?.grade || null;
+                      const novaGroup = sd.novaGroup?.group || null;
+                      if (!nutriGrade && !novaGroup) return null;
+                      return (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 6 }}>
+                          {nutriGrade && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Text style={{ fontSize: 9, fontFamily: 'Rubik_700Bold', color: colors.mutedForeground }}>NUTRI</Text>
+                              <View style={{ flexDirection: 'row', gap: 1 }}>
+                                {['a', 'b', 'c', 'd', 'e'].map(g => {
+                                  const gradeColors = { a: '#038141', b: '#85BB2F', c: '#FECB02', d: '#EE8100', e: '#E63E11' };
+                                  const isActive = g === nutriGrade.toLowerCase();
+                                  return (
+                                    <View key={g} style={{
+                                      width: isActive ? 13 : 9,
+                                      height: 13,
+                                      borderRadius: 2,
+                                      backgroundColor: isActive ? gradeColors[g] : `${gradeColors[g]}25`,
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                    }}>
+                                      <Text style={{
+                                        fontSize: isActive ? 8 : 1,
+                                        fontFamily: 'Rubik_700Bold',
+                                        color: isActive ? '#FFF' : 'transparent',
+                                      }}>{isActive ? g.toUpperCase() : ''}</Text>
+                                    </View>
+                                  );
+                                })}
+                              </View>
+                            </View>
+                          )}
+                          
+                          {novaGroup && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                              <Text style={{ fontSize: 9, fontFamily: 'Rubik_700Bold', color: colors.mutedForeground }}>NOVA</Text>
+                              <View style={{
+                                width: 14, height: 14, borderRadius: 3,
+                                backgroundColor: novaGroup <= 1 ? '#038141' : novaGroup <= 2 ? '#85BB2F' : novaGroup <= 3 ? '#EE8100' : '#E63E11',
+                                alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                <Text style={{ fontSize: 9, fontFamily: 'Rubik_700Bold', color: '#FFF' }}>{novaGroup}</Text>
+                              </View>
+                            </View>
+                          )}
+                        </View>
+                      );
+                    })()}
+
                   </View>
-                  <View style={{
-                    width: 8, height: 8, borderRadius: 4,
-                    backgroundColor: scan.safety_level === 'safe' ? colors.chart1 : colors.chart3
-                  }} />
+
+                  {/* Column 3: The Primary Safety Verdict */}
+                  {(() => {
+                    const safetyColor = scan.safety_level === 'safe' ? colors.chart1 : scan.safety_level === 'caution' ? colors.chart2 : colors.chart3;
+                    return (
+                      <View style={{ alignItems: 'flex-end', justifyContent: 'center', gap: 4 }}>
+                        <View style={{ 
+                          flexDirection: 'row', alignItems: 'center', gap: 5,
+                          backgroundColor: `${safetyColor}12`,
+                          paddingHorizontal: 8, paddingVertical: 4,
+                          borderRadius: 8,
+                        }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: safetyColor }} />
+                          <Text style={{ fontSize: 13, fontFamily: 'Rubik_700Bold', color: safetyColor }}>
+                            {scan.safety_score ? `${scan.safety_score} ` : ''}{scan.safety_level === 'safe' ? 'GOOD' : scan.safety_level?.toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })()}
                 </TouchableOpacity>
               ))}
             </View>
@@ -646,16 +896,16 @@ export default function Home() {
             Safety Summary
           </Text>
 
-          <View style={{ gap: 12 }}>
-            {/* Safe Products */}
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            {/* Safe Products — left card */}
             <View
               style={{
-                flexDirection: "row",
+                flex: 1,
                 alignItems: "center",
                 padding: 16,
                 backgroundColor: colors.card,
                 borderRadius: 16,
-                gap: 12,
+                gap: 8,
               }}
             >
               <View
@@ -670,36 +920,35 @@ export default function Home() {
               >
                 <CheckCircle size={20} color={colors.chart1} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    fontSize: 24,
-                    fontFamily: "Rubik_700Bold",
-                    color: colors.foreground,
-                  }}
-                >
-                  {stats.safe}
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: colors.mutedForeground,
-                  }}
-                >
-                  Safe Products
-                </Text>
-              </View>
+              <Text
+                style={{
+                  fontSize: 28,
+                  fontFamily: "Rubik_700Bold",
+                  color: colors.foreground,
+                }}
+              >
+                {stats.safe}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: colors.mutedForeground,
+                  textAlign: 'center',
+                }}
+              >
+                Good Products
+              </Text>
             </View>
 
-            {/* Warning Products */}
+            {/* Warning Products — right card */}
             <View
               style={{
-                flexDirection: "row",
+                flex: 1,
                 alignItems: "center",
                 padding: 16,
                 backgroundColor: colors.card,
                 borderRadius: 16,
-                gap: 12,
+                gap: 8,
               }}
             >
               <View
@@ -714,28 +963,123 @@ export default function Home() {
               >
                 <AlertTriangle size={20} color={colors.chart3} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text
-                  style={{
-                    fontSize: 24,
-                    fontFamily: "Rubik_700Bold",
-                    color: colors.foreground,
-                  }}
-                >
-                  {stats.review}
-                </Text>
-                <Text
-                  style={{
-                    fontSize: 12,
-                    color: colors.mutedForeground,
-                  }}
-                >
-                  Products to Review
-                </Text>
-              </View>
+              <Text
+                style={{
+                  fontSize: 28,
+                  fontFamily: "Rubik_700Bold",
+                  color: colors.foreground,
+                }}
+              >
+                {stats.review}
+              </Text>
+              <Text
+                style={{
+                  fontSize: 11,
+                  color: colors.mutedForeground,
+                  textAlign: 'center',
+                }}
+              >
+                Products to Review
+              </Text>
             </View>
           </View>
         </View>
+
+        {/* Weekly Deals Card */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push('/weekly-offers')}
+          style={{
+            backgroundColor: '#F0FDF4',
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 16,
+            borderWidth: 1.5,
+            borderColor: '#BBF7D0',
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{
+              width: 44, height: 44, borderRadius: 22,
+              backgroundColor: '#22C55E',
+              alignItems: 'center',
+              justifyContent: 'center', marginRight: 14,
+            }}>
+              <Tag size={20} color="#FFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontFamily: 'Rubik_700Bold', color: colors.foreground }}>
+                Weekly Deals
+              </Text>
+              <Text style={{ fontSize: 12, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground, marginTop: 1 }}>
+                Curated offers from top UK supermarkets
+              </Text>
+            </View>
+            <View style={{
+              backgroundColor: '#22C55E',
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+            }}>
+              <Text style={{ fontSize: 11, fontFamily: 'Rubik_600SemiBold', color: '#FFF' }}>
+                Browse →
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
+
+        {/* Recall Alerts — bottom of hierarchy per client request */}
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push('/alerts')}
+          style={{
+            backgroundColor: recallCount > 0 ? `${colors.primary}0A` : colors.card,
+            borderRadius: 20,
+            padding: 16,
+            marginBottom: 16,
+            borderWidth: 1.5,
+            borderColor: recallCount > 0 ? `${colors.primary}20` : colors.border,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <View style={{
+              width: 44, height: 44, borderRadius: 22,
+              backgroundColor: recallCount > 0 ? colors.primary : colors.chart1,
+              alignItems: 'center',
+              justifyContent: 'center', marginRight: 14,
+            }}>
+              {recallCount > 0 ? (
+                <Bell size={20} color={colors.primaryForeground} />
+              ) : (
+                <ShieldCheck size={20} color="#FFF" />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 15, fontFamily: 'Rubik_700Bold', color: colors.foreground }}>
+                {recallCount > 0
+                  ? `${recallCount} Recall ${recallCount === 1 ? 'Alert' : 'Alerts'}`
+                  : 'Safety Monitor'
+                }
+              </Text>
+              <Text style={{ fontSize: 12, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground, marginTop: 1 }}>
+                {recallCount > 0
+                  ? 'Product safety alerts near you'
+                  : 'No active alerts — all clear ✓'
+                }
+              </Text>
+            </View>
+            <View style={{
+              backgroundColor: recallCount > 0 ? colors.primary : colors.chart1,
+              borderRadius: 12,
+              paddingHorizontal: 12,
+              paddingVertical: 6,
+            }}>
+              <Text style={{ fontSize: 11, fontFamily: 'Rubik_600SemiBold', color: '#FFF' }}>
+                {recallCount > 0 ? 'View →' : 'Check →'}
+              </Text>
+            </View>
+          </View>
+        </TouchableOpacity>
       </ScrollView>
 
       {/* Profile Action Modal */}
@@ -845,6 +1189,6 @@ export default function Home() {
           </Pressable>
         </Pressable>
       </Modal>
-    </View>
+    </Animated.View>
   );
 }

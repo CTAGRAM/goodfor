@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Image, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, ActivityIndicator, Image, Modal } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import { ArrowLeft, Info, UserPlus, Camera, X, Trash2, Sparkles, Shield, Users, Plus, CheckCircle, AlertTriangle, ShieldCheck, Check } from 'lucide-react-native';
+import { ArrowLeft, Info, UserPlus, Camera, X, Trash2, Sparkles, Shield, Users, Plus, CheckCircle, ShieldCheck, Check, AlertTriangle } from 'lucide-react-native';
 import { colors, fonts, spacing, radius } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabaseAuth';
+import { useAlert } from "@/contexts/AlertContext";
+import { hapticLight } from "@/lib/haptics";
 
 // Helper function to convert age to age group
 const getAgeGroup = (age) => {
@@ -30,6 +32,7 @@ const getAgeGroupLabel = (age) => {
 };
 
 export default function EditProfile() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { user, profile, updateProfile: updateAuthProfile } = useAuth();
@@ -55,6 +58,17 @@ export default function EditProfile() {
     const [sensitivityLevel, setSensitivityLevel] = useState('standard');
     // Phase 4: Allergy Severity System
     const [allergenSeverity, setAllergenSeverity] = useState({});
+    // V5: Health Goals
+    const [healthGoals, setHealthGoals] = useState([]);
+    // Onboarding personalisation fields
+    const [userAgeGroup, setUserAgeGroup] = useState('');
+    const [userGender, setUserGender] = useState('');
+    const [dietPreference, setDietPreference] = useState('');
+    const [healthConcerns, setHealthConcerns] = useState([]);
+    const [processedKnowledge, setProcessedKnowledge] = useState('');
+    const [ingredientHabit, setIngredientHabit] = useState('');
+    const [referralSource, setReferralSource] = useState('');
+    const [infoPreferences, setInfoPreferences] = useState([]);
 
     // Helper to update allergen severity
     const updateAllergenSeverity = (allergen, field, value) => {
@@ -107,6 +121,17 @@ export default function EditProfile() {
             setSensitivityLevel(profile.sensitivity_level || 'standard');
             // Load allergen severity - Phase 4
             setAllergenSeverity(profile.allergen_severity || {});
+            // V5: Load health goals
+            setHealthGoals(profile.health_goals || []);
+            // Load onboarding preferences
+            setUserAgeGroup(profile.user_age_group || '');
+            setUserGender(profile.user_gender || '');
+            setDietPreference(profile.diet_preference || '');
+            setHealthConcerns(profile.health_concerns || []);
+            setProcessedKnowledge(profile.processed_knowledge || '');
+            setIngredientHabit(profile.ingredient_habit || '');
+            setReferralSource(profile.referral_source || '');
+            setInfoPreferences(profile.info_preferences || []);
         }
     }, [profile]);
 
@@ -114,7 +139,7 @@ export default function EditProfile() {
         try {
             const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
             if (status !== 'granted') {
-                Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to upload photos.');
+                showAlert('Permission Required', 'Sorry, we need camera roll permissions to upload photos.');
                 return;
             }
 
@@ -130,7 +155,7 @@ export default function EditProfile() {
             }
         } catch (error) {
             console.error('[EditProfile] Image picker error:', error);
-            Alert.alert('Error', 'Failed to pick image');
+            showAlert('Error', 'Failed to pick image');
         }
     };
 
@@ -169,10 +194,10 @@ export default function EditProfile() {
 
             setAvatarUrl(publicUrl);
             await updateAuthProfile({ avatar_url: publicUrl });
-            Alert.alert('Success', 'Profile picture updated!');
+            showAlert('Success', 'Profile picture updated!');
         } catch (error) {
             console.error('[EditProfile] Upload error:', error);
-            Alert.alert('Error', error.message || 'Failed to upload image');
+            showAlert('Error', error.message || 'Failed to upload image');
         } finally {
             setUploadingImage(false);
         }
@@ -180,7 +205,7 @@ export default function EditProfile() {
 
     const handleSave = async () => {
         if (!name.trim()) {
-            Alert.alert('Required', 'Please enter your name to complete your profile.');
+            showAlert('Required', 'Please enter your name to complete your profile.');
             return;
         }
 
@@ -208,6 +233,17 @@ export default function EditProfile() {
                 sensitivity_level: sensitivityLevel,
                 // Phase 4: Allergy Severity
                 allergen_severity: allergenSeverity,
+                // V5: Health Goals
+                health_goals: healthGoals,
+                // Onboarding personalisation
+                user_age_group: userAgeGroup || null,
+                user_gender: userGender || null,
+                diet_preference: dietPreference || null,
+                health_concerns: healthConcerns,
+                processed_knowledge: processedKnowledge || null,
+                ingredient_habit: ingredientHabit || null,
+                referral_source: referralSource || null,
+                info_preferences: infoPreferences,
                 is_profile_completed: true, // Mark as complete
             };
 
@@ -231,17 +267,17 @@ export default function EditProfile() {
 
             // Allow state update to propagate
             if (!profile?.is_profile_completed) {
-                Alert.alert('Welcome!', 'Your profile is ready. Start scanning!', [
+                showAlert('Welcome!', 'Your profile is ready. Start scanning!', [
                     { text: 'Let\'s Go', onPress: () => router.replace('/(tabs)/home') }
                 ]);
             } else {
-                Alert.alert('Success', 'Profile updated!', [
+                showAlert('Success', 'Profile updated!', [
                     { text: 'OK', onPress: () => router.back() }
                 ]);
             }
         } catch (err) {
             console.error('[EditProfile] Save execution error:', err);
-            Alert.alert('Error', `Failed to save profile: ${err.message || 'Unknown error'}`);
+            showAlert('Error', `Failed to save profile: ${err.message || 'Unknown error'}`);
         } finally {
             // Check if mounted before setting state if possible, but hooks handle this gracefully in newer React
             setSaving(false);
@@ -267,9 +303,13 @@ export default function EditProfile() {
     };
 
     const toggleCosmeticAllergen = (allergen) => {
-        setCosmeticAllergens((prev) =>
-            prev.includes(allergen) ? prev.filter((a) => a !== allergen) : [...prev, allergen]
-        );
+        setCosmeticAllergens(prev => prev.includes(allergen) ? prev.filter(a => a !== allergen) : [...prev, allergen]);
+    };
+
+    // V5: Toggle health goal
+    const toggleHealthGoal = (goal) => {
+        hapticLight();
+        setHealthGoals(prev => prev.includes(goal) ? prev.filter(g => g !== goal) : [...prev, goal]);
     };
 
     const handleManageFamily = () => {
@@ -455,6 +495,94 @@ export default function EditProfile() {
                     </View>
                 </View>
 
+                {/* V5: Health Goals Section */}
+                <View style={styles.prefCard}>
+                    <View style={styles.prefHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.prefTitle}>Health Goals</Text>
+                            <Text style={styles.prefSubtitle}>We'll tailor our analysis to your goals</Text>
+                        </View>
+                    </View>
+                    <View style={styles.tagContainer}>
+                        {[
+                            { key: 'lose_weight', label: '🎯 Lose Weight' },
+                            { key: 'gain_muscle', label: '💪 Build Muscle' },
+                            { key: 'eat_healthier', label: '🥗 Eat Healthier' },
+                            { key: 'manage_diabetes', label: '🩸 Manage Diabetes' },
+                            { key: 'reduce_sugar', label: '🚫 Reduce Sugar' },
+                            { key: 'heart_health', label: '❤️ Heart Health' },
+                            { key: 'improve_energy', label: '⚡ Improve Energy' },
+                            { key: 'better_sleep', label: '😴 Better Sleep' },
+                            { key: 'reduce_inflammation', label: '🪩 Reduce Inflammation' },
+                            { key: 'food_sensitivity', label: '🤔 Food Sensitivity' },
+                        ].map((goal) => (
+                            <Pressable
+                                key={goal.key}
+                                style={[styles.tag, healthGoals.includes(goal.key) && styles.tagActive]}
+                                onPress={() => toggleHealthGoal(goal.key)}
+                            >
+                                <Text style={[styles.tagText, healthGoals.includes(goal.key) && styles.tagTextActive]}>
+                                    {goal.label}
+                                </Text>
+                                {healthGoals.includes(goal.key) && <X size={14} color={colors.chart1} />}
+                            </Pressable>
+                        ))}
+                    </View>
+                </View>
+
+
+
+
+                {/* Health Concerns */}
+                <View style={styles.prefCard}>
+                    <View style={styles.prefHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.prefTitle}>Health Concerns</Text>
+                            <Text style={styles.prefSubtitle}>We'll flag related ingredients</Text>
+                        </View>
+                    </View>
+                    <View style={styles.tagContainer}>
+                        {['Allergies', 'Digestive issues', 'Skin sensitivity', 'Weight management', 'Heart health', 'Diabetes', 'Anxiety', 'Afternoon fatigue'].map((c) => (
+                            <Pressable
+                                key={c}
+                                style={[styles.tag, healthConcerns.includes(c) && styles.tagActive]}
+                                onPress={() => {
+                                    hapticLight();
+                                    setHealthConcerns(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
+                                }}
+                            >
+                                <Text style={[styles.tagText, healthConcerns.includes(c) && styles.tagTextActive]}>{c}</Text>
+                                {healthConcerns.includes(c) && <X size={14} color={colors.chart1} />}
+                            </Pressable>
+                        ))}
+                    </View>
+                </View>
+
+                {/* Info Preferences */}
+                <View style={styles.prefCard}>
+                    <View style={styles.prefHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.prefTitle}>Information Preferences</Text>
+                            <Text style={styles.prefSubtitle}>What matters most in your scans</Text>
+                        </View>
+                    </View>
+                    <View style={styles.tagContainer}>
+                        {['Allergen warnings', 'Safer alternatives', 'Additive details', 'Nutritional breakdown', 'Ingredient safety'].map((p) => (
+                            <Pressable
+                                key={p}
+                                style={[styles.tag, infoPreferences.includes(p) && styles.tagActive]}
+                                onPress={() => {
+                                    hapticLight();
+                                    setInfoPreferences(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
+                                }}
+                            >
+                                <Text style={[styles.tagText, infoPreferences.includes(p) && styles.tagTextActive]}>{p}</Text>
+                                {infoPreferences.includes(p) && <X size={14} color={colors.chart1} />}
+                            </Pressable>
+                        ))}
+                    </View>
+                </View>
+
                 {/* Cosmetic Personalization Section */}
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>BEAUTY PREFERENCES</Text>
@@ -467,7 +595,7 @@ export default function EditProfile() {
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                                 <Text style={styles.prefTitle}>Pregnancy & Nursing</Text>
                                 <Pressable
-                                    onPress={() => Alert.alert(
+                                    onPress={() => showAlert(
                                         "Why This Matters",
                                         "During pregnancy and breastfeeding, certain ingredients can be absorbed through the skin or ingested and may affect the baby.\n\nWe flag:\n• Retinoids (Vitamin A derivatives)\n• Salicylic acid in high doses\n• Certain essential oils\n• Chemical sunscreen ingredients\n• Parabens and phthalates\n\nThis helps you make safer choices for you and your baby.",
                                         [{ text: "Got it" }]
@@ -514,10 +642,10 @@ export default function EditProfile() {
                         {['normal', 'dry', 'oily', 'combination', 'sensitive'].map((type) => (
                             <Pressable
                                 key={type}
-                                style={[styles.tag, skinType === type && styles.tagActiveSkin]}
+                                style={[styles.tag, skinType?.toLowerCase() === type.toLowerCase() && styles.tagActiveSkin]}
                                 onPress={() => setSkinType(type)}
                             >
-                                <Text style={[styles.tagText, skinType === type && styles.tagTextActiveSkin]}>
+                                <Text style={[styles.tagText, skinType?.toLowerCase() === type.toLowerCase() && styles.tagTextActiveSkin]}>
                                     {type.charAt(0).toUpperCase() + type.slice(1)}
                                 </Text>
                             </Pressable>
@@ -1017,8 +1145,8 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
     },
     tagActive: {
-        backgroundColor: `${colors.chart3}1A`,
-        borderColor: `${colors.chart3}33`,
+        backgroundColor: colors.chart3,
+        borderColor: colors.chart3,
     },
     tagText: {
         fontSize: 12,
@@ -1026,28 +1154,28 @@ const styles = StyleSheet.create({
         color: colors.primary,
     },
     tagTextActive: {
-        color: colors.chart3,
+        color: '#FFFFFF',
     },
     tagActiveSkin: {
-        backgroundColor: `${colors.primary}1A`,
-        borderColor: `${colors.primary}33`,
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
     },
     tagTextActiveSkin: {
-        color: colors.primary,
+        color: colors.primaryForeground,
     },
     tagActiveAllergen: {
-        backgroundColor: `${colors.destructive}1A`,
-        borderColor: `${colors.destructive}33`,
+        backgroundColor: colors.destructive,
+        borderColor: colors.destructive,
     },
     tagTextActiveAllergen: {
-        color: colors.destructive,
+        color: '#FFFFFF',
     },
     tagActiveSpecial: {
-        backgroundColor: `${colors.destructive}1A`,
-        borderColor: `${colors.destructive}33`,
+        backgroundColor: colors.destructive,
+        borderColor: colors.destructive,
     },
     tagTextActiveSpecial: {
-        color: colors.destructive,
+        color: '#FFFFFF',
     },
     footer: {
         paddingHorizontal: spacing[6],

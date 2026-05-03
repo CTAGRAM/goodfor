@@ -8,7 +8,7 @@ import {
     TextInput,
     KeyboardAvoidingView,
     Platform,
-    Alert,
+    
     ActivityIndicator
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
@@ -17,8 +17,10 @@ import { useRouter } from "expo-router";
 import { ArrowLeft, Lock, Eye, EyeOff, CheckCircle, ArrowRight } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { supabase } from "@/lib/supabaseAuth";
+import { useAlert } from "@/contexts/AlertContext";
 
 export default function ResetPassword() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
 
@@ -43,17 +45,17 @@ export default function ResetPassword() {
 
     const handleUpdatePassword = async () => {
         if (!password || !confirmPassword) {
-            Alert.alert("Error", "Please fill in all fields");
+            showAlert("Error", "Please fill in all fields");
             return;
         }
 
         if (password !== confirmPassword) {
-            Alert.alert("Error", "Passwords do not match");
+            showAlert("Error", "Passwords do not match");
             return;
         }
 
         if (password.length < 8) {
-            Alert.alert("Error", "Password must be at least 8 characters");
+            showAlert("Error", "Password must be at least 8 characters");
             return;
         }
 
@@ -84,7 +86,7 @@ export default function ResetPassword() {
             // If error is just timeout but event happened (handled by Effect), this might conflict.
             // But usually Alert is fine.
             if (!success) {
-                Alert.alert("Error", err.message || "Failed to update password");
+                showAlert("Error", err.message || "Failed to update password");
             }
         } finally {
             console.log('[ResetPassword] Setting loading to false');

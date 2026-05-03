@@ -242,14 +242,48 @@ export async function getAlternatives(product, count = 5, options = {}) {
         const countryBaseUrl = `https://${subdomain}.openfoodfacts.org`;
         console.log('[Alternatives] Using country:', countryCode, '→', countryBaseUrl);
 
-        // V4: Get category tags for filtering (use first 2 for broader but relevant matches)
+        // V4: Get category tags for filtering — use MOST SPECIFIC categories (last tags)
+        // to prevent broad matches (e.g. both "biscuits" and "coke" sharing "en:snacks")
         const productCategories = product.categories || options.categoryTags || [];
-        const filterCategories = productCategories.slice(0, 2);
+        const filterCategories = productCategories.length > 3
+            ? productCategories.slice(-3)  // last 3 = most specific
+            : productCategories;
 
-        // V4: Helper to check category overlap
-        const hasMatchingCategory = (altCategories) => {
-            if (!filterCategories.length || !altCategories?.length) return true; // no filter = pass all
-            return filterCategories.some(cat => altCategories.includes(cat));
+        // V6: Extract product-type keywords from the product name for relevance checking
+        // This helps when the product only has broad categories like "en:plant-based-foods-and-beverages"
+        const productNameWords = (product.name || '')
+            .toLowerCase()
+            .replace(/[^a-z\s]/g, '')
+            .split(/\s+/)
+            .filter(w => w.length > 3 && !['with', 'and', 'the', 'for', 'from', 'pack', 'size', 'premium', 'original', 'classic'].includes(w));
+
+        // V6: Detect if we only have broad/generic categories (1-2 top-level tags)
+        const hasOnlyBroadCategories = productCategories.length <= 2;
+
+        // V6: Helper to check category overlap + name relevance
+        const hasMatchingCategory = (altCategories, altName) => {
+            if (!filterCategories.length) return true; // no filter = pass all
+
+            // Check category overlap
+            const categoryMatch = filterCategories.some(cat => altCategories?.includes(cat));
+
+            // If we have specific categories and there's a match, that's good enough
+            if (categoryMatch && !hasOnlyBroadCategories) return true;
+
+            // V6: For products with only broad categories, also check name relevance
+            // e.g., if product is "Dates", alt should contain "date" in name or categories
+            if (hasOnlyBroadCategories && productNameWords.length > 0) {
+                const altNameLower = (altName || '').toLowerCase();
+                const altCatString = (altCategories || []).join(' ').toLowerCase();
+                const nameRelevance = productNameWords.some(word =>
+                    altNameLower.includes(word) || altCatString.includes(word)
+                );
+                // If name has no overlap and only broad category match, reject
+                if (!nameRelevance && categoryMatch) return false;
+                if (nameRelevance) return true;
+            }
+
+            return categoryMatch;
         };
 
         // Strategy 1: Category-based search (MOST EFFECTIVE)
@@ -279,7 +313,7 @@ export async function getAlternatives(product, count = 5, options = {}) {
                     const products = (data.products || [])
                         .filter(p => !seenBarcodes.has(p.code) && p.product_name)
                         // V4: Filter by category overlap (at least 1 shared category)
-                        .filter(p => hasMatchingCategory(p.categories_tags))
+                        .filter(p => hasMatchingCategory(p.categories_tags, p.product_name))
                         .sort((a, b) => {
                             const gradeOrder = { 'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'unknown': 5 };
                             return (gradeOrder[a.nutriscore_grade] || 5) - (gradeOrder[b.nutriscore_grade] || 5);
@@ -303,31 +337,44 @@ export async function getAlternatives(product, count = 5, options = {}) {
             return allAlternatives.slice(0, count);
         }
 
-        // Strategy 2: Text search with simplified category name
+        // Strategy 2: Text search with product name keywords
+        // V7: PRIORITIZE product name keywords FIRST, then category text
+        // This ensures 'dates' is searched before 'plant based foods'
         const searchTerms = [];
 
-        // Extract clean category name
+        // V7: Add product-specific keywords FIRST (most relevant)
+        if (product.name && product.name !== 'Unknown Product') {
+            const nameWords = product.name
+                .toLowerCase()
+                .replace(/[^a-z\s]/g, '')
+                .split(/\s+/)
+                .filter(w => w.length > 3 && !['with', 'and', 'the', 'for', 'from', 'pack', 'size',
+                    'premium', 'original', 'classic', 'flavour', 'flavor', 'natural'].includes(w));
+            // Use the most descriptive word(s) from the product name
+            if (nameWords.length > 0) {
+                // Try compound term first (e.g. 'dates crown'), then single words
+                const compound = nameWords.slice(0, 2).join(' ');
+                searchTerms.push(compound);
+                // Add single most descriptive word as fallback
+                if (nameWords[0] && !searchTerms.includes(nameWords[0])) {
+                    searchTerms.push(nameWords[0]);
+                }
+            }
+        }
+
+        // Then add category-based search terms (secondary)
         if (productCategories.length > 0) {
-            const cleanCategory = productCategories[0]
+            const validCategories = productCategories.filter(c => !c.includes(':') || c.startsWith('en:'));
+            const bestCategory = validCategories[validCategories.length - 1] || productCategories[productCategories.length - 1];
+            const cleanCategory = bestCategory
                 .replace('en:', '')
                 .replace(/-/g, ' ')
                 .split(' ')
                 .filter(w => w.length > 2)
-                .slice(0, 2)
+                .slice(0, 3)
                 .join(' ');
-            if (cleanCategory && cleanCategory.length > 3) {
+            if (cleanCategory && cleanCategory.length > 3 && !searchTerms.includes(cleanCategory)) {
                 searchTerms.push(cleanCategory);
-            }
-        }
-
-        // Add product type keywords
-        if (product.name && product.name !== 'Unknown Product') {
-            const nameWords = product.name
-                .toLowerCase()
-                .split(/\s+/)
-                .filter(w => w.length > 3 && !['with', 'and', 'the', 'for'].includes(w));
-            if (nameWords.length > 0) {
-                searchTerms.push(nameWords[0]);
             }
         }
 
@@ -356,10 +403,11 @@ export async function getAlternatives(product, count = 5, options = {}) {
                     const data = await response.json();
                     console.log('[Alternatives] Text search raw results:', data.products?.length || 0, 'for:', searchTerm);
 
+                    // V7: For text search, DON'T apply strict category filter
+                    // The text search term itself provides relevance (e.g. 'dates' → date products)
+                    // Strict category filter rejects valid results with non-English names or different category tags
                     const products = (data.products || [])
                         .filter(p => !seenBarcodes.has(p.code) && p.product_name)
-                        // V4: Filter by category overlap
-                        .filter(p => hasMatchingCategory(p.categories_tags))
                         .sort((a, b) => {
                             const gradeOrder = { 'a': 0, 'b': 1, 'c': 2, 'd': 3, 'e': 4, 'unknown': 5 };
                             return (gradeOrder[a.nutriscore_grade] || 5) - (gradeOrder[b.nutriscore_grade] || 5);
@@ -425,6 +473,7 @@ export async function getAlternatives(product, count = 5, options = {}) {
                     const data = await response.json();
                     const products = (data.products || [])
                         .filter(p => !seenBarcodes.has(p.code) && p.product_name)
+                        // V7: No strict category filter for fallback — search term provides relevance
                         .slice(0, count);
 
                     products.forEach(p => {

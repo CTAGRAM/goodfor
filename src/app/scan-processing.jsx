@@ -8,6 +8,7 @@ import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { getProductByBarcode, PRODUCT_TYPES } from "@/lib/productRouter";
 import { analyzeProductSafety, yearsToMonths } from "@/lib/productSafety";
 import { analyzeCosmeticSafety } from "@/lib/cosmeticSafety";
+import { hapticSuccess, hapticError } from "@/lib/haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRevenueCat } from "@/contexts/RevenueCatContext";
 import { supabase } from "@/lib/supabaseAuth";
@@ -144,7 +145,7 @@ export default function ScanProcessing() {
             // Get user's personal allergies and dietary restrictions for personalized scoring
             const userPreferences = {
                 allergies: activeFamilyMember?.allergies || profile?.allergies || [],
-                dietaryRestrictions: activeFamilyMember?.dietary_restrictions || profile?.dietary_restrictions || [],
+                dietaryRestrictions: activeFamilyMember?.dietary_restrictions || profile?.dietary_preferences || [],
                 healthConditions: activeFamilyMember?.health_conditions || profile?.health_conditions || [],
                 isPregnant: ageSource?.is_pregnant || false,
                 isBreastfeeding: ageSource?.is_breastfeeding || false,
@@ -194,12 +195,14 @@ export default function ScanProcessing() {
             // Small delay to ensure database write is committed before navigation
             await new Promise(resolve => setTimeout(resolve, 200));
 
+            hapticSuccess();
             router.replace({
                 pathname: '/product-summary',
                 params: { productData: JSON.stringify({ ...product, safetyAnalysis }) },
             });
         } catch (error) {
             console.error('Scan error:', error);
+            hapticError();
             router.replace({
                 pathname: '/scan-error',
                 params: { barcode, error: error.message },

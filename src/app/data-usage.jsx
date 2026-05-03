@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Modal, Pressable, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Pressable, ActivityIndicator } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -22,8 +22,10 @@ import {
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
+import { useAlert } from "@/contexts/AlertContext";
 
 export default function DataUsage() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { profile, user } = useAuth();
@@ -116,7 +118,7 @@ export default function DataUsage() {
                 setShowExportModal(false);
             } else {
                 // Fallback if sharing isn't available
-                Alert.alert(
+                showAlert(
                     'Export Complete',
                     `Your data has been saved to:\n${fileUri}\n\nContains:\n• ${exportData.scans.length} scans\n• ${exportData.family_members.length} family profiles\n• ${exportData.favorites.length} favorites`
                 );
@@ -124,7 +126,7 @@ export default function DataUsage() {
             }
         } catch (error) {
             console.error('[DataUsage] Export error:', error);
-            Alert.alert('Error', 'Failed to export data. Please try again.');
+            showAlert('Error', 'Failed to export data. Please try again.');
         } finally {
             setIsExporting(false);
         }
@@ -139,10 +141,10 @@ export default function DataUsage() {
                 .eq('user_id', user.id);
 
             if (error) throw error;
-            Alert.alert('Success', 'All scan history has been deleted.');
+            showAlert('Success', 'All scan history has been deleted.');
             setShowDeleteModal(false);
         } catch (error) {
-            Alert.alert('Error', 'Failed to delete scan history');
+            showAlert('Error', 'Failed to delete scan history');
         } finally {
             setIsDeleting(false);
         }
@@ -431,7 +433,7 @@ export default function DataUsage() {
                             <Pressable
                                 style={styles.deleteOption}
                                 onPress={() => {
-                                    Alert.alert(
+                                    showAlert(
                                         'Delete Scan History',
                                         'Are you sure you want to delete all your scan history? This cannot be undone.',
                                         [

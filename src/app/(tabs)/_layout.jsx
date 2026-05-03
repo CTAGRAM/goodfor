@@ -2,6 +2,7 @@ import { Tabs } from "expo-router";
 import { View } from "react-native";
 import { Home, History, QrCode, MessageCircle, Settings } from "lucide-react-native";
 import { colors } from "@/constants/theme";
+import { hapticLight, hapticMedium } from "@/lib/haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabLayout() {
@@ -9,6 +10,16 @@ export default function TabLayout() {
 
     return (
         <Tabs
+            screenListeners={{
+                tabPress: (e) => {
+                    // Different haptic for scan button vs regular tabs
+                    if (e.target?.startsWith('scan')) {
+                        hapticMedium();
+                    } else {
+                        hapticLight();
+                    }
+                },
+            }}
             screenOptions={{
                 headerShown: false,
                 tabBarActiveTintColor: colors.primary,
@@ -105,7 +116,7 @@ export default function TabLayout() {
             <Tabs.Screen
                 name="ai"
                 options={{
-                    title: 'AI',
+                    title: 'Ask',
                     tabBarIcon: ({ color, focused }) => (
                         <MessageCircle
                             size={24}

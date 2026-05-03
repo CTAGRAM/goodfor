@@ -17,7 +17,9 @@ import {
     CONCERN_CATEGORIES,
     POSITION_MULTIPLIERS,
     PRODUCT_TYPE_MODIFIERS,
-    EFFICACY_INGREDIENTS
+    EFFICACY_INGREDIENTS,
+    COSMETIC_INGREDIENTS,
+    getCosmeticIngredientInfo
 } from '@/data/cosmeticIngredients';
 
 // Simple severity levels for use in code
@@ -243,10 +245,120 @@ export function analyzeCosmeticSafety(product, userPreferences = {}) {
         }
     }
 
-    // 3b. Check comprehensive Ingredient Database
-    // NOTE: COSMETIC_INGREDIENTS database is planned for future implementation
-    // For now, we rely on the restrictions above and fragrance allergen database
-    // TODO: Implement comprehensive ingredient risk database as per Phase 1 of implementation plan
+    // 3b. Check comprehensive Ingredient Database (COSMETIC_INGREDIENTS)
+    // Each ingredient is looked up in the database. Known-risky ingredients get
+    // severity-based penalties. Unknown ingredients get a moderate penalty since
+    // we can't confirm their safety — this prevents inflated scores.
+    let unknownIngredientCount = 0;
+    const knownSafePatterns = [
+        /\bwater\b/i, /\baqua\b/i, /\beau\b/i,
+        /glycerin/i, /glycerol/i,
+        /\btocopherol\b/i, /\bvitamin e\b/i,
+        /panthenol/i, /\bprovitamin b5\b/i,
+        /allantoin/i,
+        /\bsqualane\b/i, /\bsqualene\b/i,
+        /\burea\b/i,
+        /\bxanthan gum\b/i,
+        /\bcarbomer\b/i,
+        /\bcitric acid\b/i,
+        /\bsodium chloride\b/i,
+        /\bpotassium sorbate\b/i,
+        /\bsodium benzoate\b/i,
+        /\bcaprylyl glycol\b/i,
+        /\bethylhexylglycerin\b/i,
+        /\bsorbitol\b/i,
+        /\bpropylene glycol\b/i,
+        /\bbutylene glycol\b/i,
+        /\bsodium hydroxide\b/i,
+        /\bstearic acid\b/i,
+        /\bpalmitic acid\b/i,
+        /\bmyristic acid\b/i,
+        /\boleic acid\b/i,
+        /\blinoleic acid\b/i,
+        /\bcaprylic.?capric triglyceride\b/i,
+        /\bisopropyl myristate\b/i,
+        /\bpolyethylene glycol\b/i, /\bpeg-/i,
+        /\bpolysorbate/i,
+        /\bglyceryl stearate\b/i,
+        /\bceteareth-\d+/i,
+        /\bsteareth-\d+/i,
+        /\bpoloxamer/i,
+        /\bhydrogenated\b.*\boil\b/i,
+        /\bbehenyl alcohol\b/i,
+        /\bmyristyl alcohol\b/i,
+        /\boleyl alcohol\b/i,
+        /\barachidyl alcohol\b/i,
+        /\bchlorhexidine\b/i,
+        /\bmenthol\b/i,
+        /\bcamphor\b/i,
+    ];
+
+    for (let i = 0; i < normalizedIngredients.length; i++) {
+        const ing = normalizedIngredients[i];
+        if (!ing || ing.length < 2) continue;
+
+        // Skip if already flagged by hardcoded restrictions above
+        if (issues.some(iss => iss.name === ing.toUpperCase())) continue;
+
+        // Look up in COSMETIC_INGREDIENTS database
+        const dbEntry = getCosmeticIngredientInfo(ing);
+
+        if (dbEntry) {
+            // Found in database — apply severity-based penalty if not SAFE
+            if (dbEntry.safetyLevel && dbEntry.safetyLevel !== 'SAFE') {
+                const severity = dbEntry.safetyLevel; // 'CAUTION', 'AVOID', 'CRITICAL'
+                const reason = dbEntry.concerns && dbEntry.concerns.length > 0
+                    ? dbEntry.concerns[0]
+                    : `${dbEntry.category || 'Ingredient'} — ${severity.toLowerCase()} risk`;
+
+                // Map safetyLevel to pillar
+                let pillar = 'toxicity';
+                const lowerConcerns = (dbEntry.concerns || []).join(' ').toLowerCase();
+                if (lowerConcerns.includes('endocrine') || lowerConcerns.includes('hormone') || lowerConcerns.includes('estrogenic')) {
+                    pillar = 'endocrine';
+                } else if (lowerConcerns.includes('sensitiz') || lowerConcerns.includes('allergi') || lowerConcerns.includes('irritat')) {
+                    pillar = 'sensitization';
+                } else if (lowerConcerns.includes('environment') || lowerConcerns.includes('coral') || lowerConcerns.includes('biodegradable')) {
+                    pillar = 'environment';
+                }
+
+                issues.push({
+                    name: (dbEntry.inci || ing).toUpperCase(),
+                    severity,
+                    reason,
+                    type: 'DATABASE_MATCH',
+                    pillar,
+                    position: i + 1
+                });
+            }
+            // If SAFE, no penalty — this is expected
+        } else {
+            // Not in database — check if it's a known-safe common ingredient
+            const isKnownSafe = knownSafePatterns.some(p => p.test(ing));
+
+            if (!isKnownSafe) {
+                unknownIngredientCount++;
+            }
+        }
+    }
+
+    // Apply penalty for unknown/unrecognized ingredients
+    // Each unknown ingredient = moderate penalty since we can't confirm safety
+    if (unknownIngredientCount > 0) {
+        const unknownPenaltyPerIngredient = 5;
+        const maxUnknownPenalty = 50; // Cap total unknown penalty
+        const totalUnknownPenalty = Math.min(unknownIngredientCount * unknownPenaltyPerIngredient, maxUnknownPenalty);
+
+        issues.push({
+            name: `${unknownIngredientCount} UNRECOGNIZED INGREDIENTS`,
+            severity: unknownIngredientCount > 3 ? 'CAUTION' : 'LOW_RISK',
+            reason: `${unknownIngredientCount} ingredient(s) not in our safety database — safety unconfirmed`,
+            type: 'UNKNOWN_INGREDIENT',
+            pillar: 'dataQuality',
+            position: normalizedIngredients.length,
+            unknownPenalty: totalUnknownPenalty // Custom property for scoring
+        });
+    }
 
     // 4. Check EU fragrance allergens
     const fragranceAllergens = checkFragranceAllergens(ingredients, ageMonths);
@@ -324,9 +436,18 @@ function calculateCosmeticSafeScore(issues, product, userPreferences = {}) {
     else pillars.dataQuality = 10; // Good data availability
 
     // 3. Apply Penalties based on Issues + Logic
-    const usedIssues = new Set(); // To avoid double counting same issue type? No, stack them.
 
     for (const issue of issues) {
+        // Handle UNKNOWN_INGREDIENT specially — uses custom penalty amount
+        if (issue.type === 'UNKNOWN_INGREDIENT' && issue.unknownPenalty) {
+            // Split unknown penalty: 60% to dataQuality, 40% to toxicity (we can't confirm safety)
+            const dqPenalty = issue.unknownPenalty * 0.6;
+            const toxPenalty = issue.unknownPenalty * 0.4;
+            pillars.dataQuality = Math.max(0, pillars.dataQuality - dqPenalty);
+            pillars.toxicity = Math.max(0, pillars.toxicity - toxPenalty);
+            continue;
+        }
+
         const pillarKey = issue.pillar || mapTypeToPillar(issue.type);
         if (!pillars[pillarKey]) continue;
 
@@ -361,11 +482,14 @@ function calculateCosmeticSafeScore(issues, product, userPreferences = {}) {
         finalScore = applyEfficacyBalance(finalScore, product, userPreferences);
     }
 
-    // 7. Hard Caps for Critical/Banned items
+    // 7. Hard Caps by worst severity found
     if (issues.some(i => i.isBanned || i.severity === 'CRITICAL' || i.severity === SEVERITY.CRITICAL)) {
         finalScore = Math.min(finalScore, 10);
     } else if (issues.some(i => i.severity === 'AVOID' || i.severity === SEVERITY.AVOID)) {
         finalScore = Math.min(finalScore, 35);
+    } else if (issues.filter(i => i.severity === 'CAUTION' || i.severity === SEVERITY.CAUTION).length >= 2) {
+        // Multiple CAUTION ingredients should still drag score down meaningfully
+        finalScore = Math.min(finalScore, 65);
     }
 
     return {
@@ -383,6 +507,8 @@ function mapTypeToPillar(type) {
         'AGE_RESTRICTION': 'toxicity',
         'PREGNANCY_RESTRICTION': 'toxicity',
         'INGREDIENT_CONCERN': 'toxicity', // Default
+        'DATABASE_MATCH': 'toxicity', // From COSMETIC_INGREDIENTS DB
+        'UNKNOWN_INGREDIENT': 'dataQuality', // Unknown ingredients
         'FRAGRANCE_ALLERGEN': 'sensitization',
         'FRAGRANCE': 'sensitization',
         'SUNSCREEN_FILTER': 'endocrine',
@@ -396,11 +522,11 @@ function mapTypeToPillar(type) {
  * Helper: Base penalty points by severity
  */
 function getBasePenalty(severity) {
-    // Handle both new RISK_LEVELS and strict strings
-    if (severity === 'CRITICAL' || severity === 'BANNED' || severity === SEVERITY.CRITICAL) return 15;
-    if (severity === 'AVOID' || severity === 'HIGH_RISK' || severity === SEVERITY.AVOID) return 10;
-    if (severity === 'CAUTION' || severity === 'MODERATE_RISK' || severity === SEVERITY.CAUTION) return 5;
-    if (severity === 'LOW_RISK' || severity === SEVERITY.SAFE) return 2;
+    // Calibrated penalties aligned with EWG/Yuka-style scoring
+    if (severity === 'CRITICAL' || severity === 'BANNED' || severity === SEVERITY.CRITICAL) return 25;
+    if (severity === 'AVOID' || severity === 'HIGH_RISK' || severity === SEVERITY.AVOID) return 18;
+    if (severity === 'CAUTION' || severity === 'MODERATE_RISK' || severity === SEVERITY.CAUTION) return 10;
+    if (severity === 'LOW_RISK' || severity === SEVERITY.SAFE) return 4;
     return 0;
 }
 
@@ -408,12 +534,12 @@ function getBasePenalty(severity) {
  * Helper: INCI Position Multiplier
  */
 function getPositionMultiplier(position, isAfterFragrance = false) {
-    if (isAfterFragrance) return 0.25; // Trace amount
-    if (position <= 2) return 1.8;      // Primary ingredients
-    if (position <= 5) return 1.5;      // High concentration
-    if (position <= 10) return 1.0;     // Standard
-    if (position <= 20) return 0.7;     // Low
-    return 0.4;                         // Trace/adjusters
+    if (isAfterFragrance) return 0.4;  // Trace amount — still penalize
+    if (position <= 2) return 2.0;     // Primary ingredients — heavy penalty
+    if (position <= 5) return 1.6;     // High concentration
+    if (position <= 10) return 1.2;    // Standard — still meaningful
+    if (position <= 20) return 0.9;    // Low — still counts
+    return 0.6;                        // Trace/adjusters — not negligible
 }
 
 /**
@@ -492,7 +618,7 @@ function applyEfficacyBalance(score, product, prefs) {
         });
     }
 
-    return Math.min(100, score + Math.min(15, bonus)); // Cap bonus at 15
+    return Math.min(100, score + Math.min(8, bonus)); // Cap bonus at 8 to avoid inflating problematic products
 }
 
 /**

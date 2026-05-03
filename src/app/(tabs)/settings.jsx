@@ -1,19 +1,23 @@
-import { useState, useEffect } from 'react';
-import { View, Text, Pressable, ScrollView, Image, StyleSheet, Switch, Alert } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { View, Text, Pressable, ScrollView, Image, StyleSheet, Switch, Linking } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  Award, RefreshCw, LogOut, Database, Trash2, Palette,
-  Wind, Leaf, BarChart2, Type, Info, ChevronRight
+  Award, RefreshCw, LogOut, Database, Trash2, Palette, CreditCard,
+  Wind, Leaf, BarChart2, Type, Info, ChevronRight, Bell, MessageCircle, Star
 } from 'lucide-react-native';
 import { colors, fonts, fontSizes, spacing, radius } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { signOut } from '@/lib/supabaseAuth';
+import { useAlert } from "@/contexts/AlertContext";
+import { hapticLight, hapticMedium } from "@/lib/haptics";
 
 const INSIGHTS_PREFS_KEY = 'goodfor_insights_prefs';
 
 export default function Settings() {
+  const { showAlert } = useAlert();
   const router = useRouter();
   const { profile, activeFamilyMember } = useAuth();
 
@@ -22,6 +26,20 @@ export default function Settings() {
   const [envImpact, setEnvImpact] = useState(true);
   const [businessInsights, setBusinessInsights] = useState(false);
   const [isPrefsLoaded, setIsPrefsLoaded] = useState(false);
+
+  const opacity = useSharedValue(0);
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+  }));
+
+  useFocusEffect(
+    useCallback(() => {
+      opacity.value = withTiming(1, { duration: 400 });
+      return () => {
+        opacity.value = 0;
+      };
+    }, [])
+  );
 
   // Load saved preferences on mount
   useEffect(() => {
@@ -80,8 +98,10 @@ export default function Settings() {
     {
       title: 'ACCOUNT',
       items: [
+        { icon: Bell, label: 'Recall Alerts', subtitle: 'Product safety notifications', color: colors.chart3, destructive: false, onPress: () => router.push('/alerts') },
+        { icon: CreditCard, label: 'My Loyalty Cards', subtitle: 'Store reward cards', color: colors.chart1, destructive: false, onPress: () => router.push('/loyalty-cards') },
         { icon: Award, label: 'Manage Subscription', color: colors.primary, destructive: false, onPress: () => router.push('/subscription') },
-        { icon: RefreshCw, label: 'Restore Purchases', color: colors.primary, destructive: false, onPress: () => Alert.alert('Restore Purchases', 'This feature will be available soon!') },
+        { icon: RefreshCw, label: 'Restore Purchases', color: colors.primary, destructive: false, onPress: () => showAlert('Restore Purchases', 'This feature will be available soon!') },
         { icon: LogOut, label: 'Sign Out', color: colors.destructive, destructive: true, onPress: handleSignOut },
       ],
     },
@@ -92,10 +112,17 @@ export default function Settings() {
         { icon: Trash2, label: 'Delete Account', color: colors.destructive, destructive: true, onPress: () => router.push('/delete-account') },
       ],
     },
+    {
+      title: 'SUPPORT',
+      items: [
+        { icon: MessageCircle, label: 'Send Feedback', subtitle: 'Help us improve GoodFor', color: colors.chart1, destructive: false, onPress: () => Linking.openURL('mailto:hello@goodfor.app?subject=GoodFor%20App%20Feedback') },
+        { icon: Star, label: 'Rate Us', subtitle: 'Leave a review on the App Store', color: colors.chart2, destructive: false, onPress: () => showAlert('Rate Us', 'Thank you for your support! Store links coming soon.') },
+      ],
+    },
   ];
 
   return (
-    <View style={styles.container}>
+    <Animated.View style={[styles.container, animatedStyle]}>
       <StatusBar style="dark" />
 
       {/* Background blurs */}
@@ -110,7 +137,7 @@ export default function Settings() {
         </View>
         <Pressable
           style={[styles.profilePicture, { backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }]}
-          onPress={() => router.push('/edit-profile')}
+          onPress={() => { hapticLight(); router.push('/edit-profile'); }}
         >
           {(activeFamilyMember?.avatar_url || profile?.avatar_url) ? (
             <Image
@@ -143,7 +170,7 @@ export default function Settings() {
                   <Pressable
                     key={itemIndex}
                     style={[styles.settingItem, !isLast && styles.settingItemBorder]}
-                    onPress={item.onPress}
+                    onPress={() => { item.destructive ? hapticMedium() : hapticLight(); item.onPress(); }}
                   >
                     <View style={styles.settingItemLeft}>
                       <View style={[
@@ -183,7 +210,7 @@ export default function Settings() {
               </View>
               <Switch
                 value={envImpact}
-                onValueChange={setEnvImpact}
+                onValueChange={(val) => { hapticLight(); setEnvImpact(val); }}
                 trackColor={{ false: colors.muted, true: colors.primary }}
                 thumbColor={colors.card}
               />
@@ -197,7 +224,7 @@ export default function Settings() {
               </View>
               <Switch
                 value={businessInsights}
-                onValueChange={setBusinessInsights}
+                onValueChange={(val) => { hapticLight(); setBusinessInsights(val); }}
                 trackColor={{ false: colors.muted, true: colors.primary }}
                 thumbColor={colors.card}
               />
@@ -246,9 +273,9 @@ export default function Settings() {
           <Text style={styles.versionText}>Made with ♥ by GoodFor</Text>
         </View>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 40 }} />
       </ScrollView>
-    </View>
+    </Animated.View>
   );
 }
 

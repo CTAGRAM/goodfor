@@ -39,7 +39,7 @@ const SAFETY_CONFIG = {
         color: colors.chart1,
         bgColor: `${colors.chart1}15`,
         borderColor: `${colors.chart1}30`,
-        label: 'Safe'
+        label: 'Good'
     },
     'CAUTION': {
         icon: AlertCircle,
@@ -130,9 +130,18 @@ export default function IngredientDetailModal({ visible, onClose, ingredientCode
                 ]}>
                     {/* Header */}
                     <View style={styles.header}>
-                        <Text style={styles.headerTitle} numberOfLines={2}>
-                            {info.name}
-                        </Text>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.expertTag}>EXPERT ANALYSIS</Text>
+                            <Text style={styles.headerTitle} numberOfLines={2}>
+                                {info.name}
+                            </Text>
+                            {/* Show E-number if the ingredient code starts with 'e' */}
+                            {ingredientCode && /^e\d+/i.test(ingredientCode) && (
+                                <View style={styles.eCodeHeaderBadge}>
+                                    <Text style={styles.eCodeHeaderText}>{ingredientCode.toUpperCase()}</Text>
+                                </View>
+                            )}
+                        </View>
                         <TouchableOpacity style={styles.closeButton} onPress={onClose}>
                             <X size={22} color={colors.mutedForeground} />
                         </TouchableOpacity>
@@ -142,24 +151,27 @@ export default function IngredientDetailModal({ visible, onClose, ingredientCode
                         style={styles.scrollView}
                         showsVerticalScrollIndicator={false}
                     >
-                        {/* Safety Level Badge */}
-                        <View style={[
-                            styles.safetyBadge,
-                            {
-                                backgroundColor: safetyConfig.bgColor,
-                                borderColor: safetyConfig.borderColor,
-                            }
-                        ]}>
-                            <SafetyIcon size={20} color={safetyConfig.color} />
-                            <Text style={[styles.safetyText, { color: safetyConfig.color }]}>
-                                {safetyConfig.label}
-                            </Text>
+                        {/* Safety Level Badge / Expert Verdict */}
+                        <View style={styles.expertVerdictSection}>
+                            <Text style={styles.expertVerdictLabel}>Expert Verdict</Text>
+                            <View style={[
+                                styles.safetyBadge,
+                                {
+                                    backgroundColor: safetyConfig.bgColor,
+                                    borderColor: safetyConfig.borderColor,
+                                }
+                            ]}>
+                                <SafetyIcon size={20} color={safetyConfig.color} />
+                                <Text style={[styles.safetyText, { color: safetyConfig.color }]}>
+                                    {safetyConfig.label}
+                                </Text>
+                            </View>
                         </View>
 
-                        {/* Function — NEW */}
+                        {/* What it actually is (Function) */}
                         {info.function && (
                             <View style={styles.functionSection}>
-                                <Text style={styles.functionLabel}>{info.category}</Text>
+                                <Text style={styles.functionLabel}>What it actually is</Text>
                                 <Text style={styles.functionText}>{info.function}</Text>
                             </View>
                         )}
@@ -217,7 +229,7 @@ export default function IngredientDetailModal({ visible, onClose, ingredientCode
                             <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <FlaskConical size={18} color={colors.primary} />
-                                    <Text style={styles.sectionTitle}>Details</Text>
+                                    <Text style={styles.sectionTitle}>The Science</Text>
                                 </View>
                                 {evidenceParagraphs.map((paragraph, index) => (
                                     <Text key={index} style={[
@@ -371,10 +383,34 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         flex: 1,
-        fontSize: 18,
+        fontSize: 22,
         fontFamily: fonts.heading.bold,
         color: colors.foreground,
         paddingRight: spacing[2],
+        lineHeight: 28,
+    },
+    expertTag: {
+        fontSize: 10,
+        fontFamily: fonts.sans.bold,
+        color: colors.primary,
+        letterSpacing: 1.5,
+        marginBottom: 4,
+    },
+    eCodeHeaderBadge: {
+        alignSelf: 'flex-start',
+        marginTop: spacing[2],
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: radius.md,
+        borderWidth: 1.5,
+        borderColor: colors.border,
+        backgroundColor: colors.background,
+    },
+    eCodeHeaderText: {
+        fontSize: 12,
+        fontFamily: fonts.heading.bold,
+        color: colors.foreground,
+        letterSpacing: 0.5,
     },
     closeButton: {
         padding: spacing[1],
@@ -382,31 +418,45 @@ const styles = StyleSheet.create({
     scrollView: {
         flex: 1,
     },
-    safetyBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: spacing[2],
+    expertVerdictSection: {
         marginHorizontal: spacing[5],
         marginTop: spacing[4],
         marginBottom: spacing[2],
+    },
+    expertVerdictLabel: {
+        fontSize: 12,
+        fontFamily: fonts.sans.bold,
+        color: colors.mutedForeground,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: spacing[2],
+    },
+    safetyBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        gap: spacing[2],
         paddingVertical: spacing[3],
         paddingHorizontal: spacing[4],
-        borderRadius: radius.full,
-        borderWidth: 1,
+        borderRadius: radius.lg,
+        borderWidth: 1.5,
     },
     safetyText: {
-        fontSize: 14,
+        fontSize: 15,
         fontFamily: fonts.sans.bold,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
     },
-    // Function section (replaces simple category for beauty ingredients)
+    // Function section (What it actually is)
     functionSection: {
         marginHorizontal: spacing[5],
         marginBottom: spacing[4],
-        marginTop: spacing[2],
-        alignItems: 'center',
+        marginTop: spacing[3],
+        backgroundColor: `${colors.primary}05`,
+        padding: spacing[4],
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: `${colors.primary}15`,
     },
     functionLabel: {
         fontSize: 11,
@@ -414,14 +464,13 @@ const styles = StyleSheet.create({
         color: colors.primary,
         textTransform: 'uppercase',
         letterSpacing: 0.5,
-        marginBottom: spacing[1],
+        marginBottom: spacing[2],
     },
     functionText: {
-        fontSize: 13,
+        fontSize: 14,
         fontFamily: fonts.sans.medium,
-        color: colors.mutedForeground,
-        textAlign: 'center',
-        lineHeight: 19,
+        color: colors.foreground,
+        lineHeight: 22,
     },
     categorySection: {
         marginHorizontal: spacing[5],

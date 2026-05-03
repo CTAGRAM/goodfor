@@ -5,8 +5,7 @@ import {
     StyleSheet,
     ScrollView,
     Pressable,
-    ActivityIndicator,
-    Alert
+    ActivityIndicator
 } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -23,8 +22,10 @@ import {
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { useRevenueCat } from "@/contexts/RevenueCatContext";
 import { RevenueCatUI } from "react-native-purchases-ui";
+import { useAlert } from "@/contexts/AlertContext";
 
 export default function CustomerCenter() {
+    const { showAlert } = useAlert();
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { customerInfo, isLoading, isPro, restorePurchases, refreshCustomerInfo } = useRevenueCat();
@@ -38,9 +39,14 @@ export default function CustomerCenter() {
 
     const handleRestorePurchases = async () => {
         try {
-            await restorePurchases();
+            const customerInfo = await restorePurchases();
+            if (customerInfo?.entitlements?.active?.['GoodFor Pro']) {
+                showAlert('Success', 'Your purchases have been restored!');
+            } else {
+                showAlert('No Purchases Found', "We couldn't find any active subscriptions to restore.");
+            }
         } catch (error) {
-            // Error already handled in restorePurchases
+            showAlert('Restore Failed', error.message || 'An error occurred while restoring purchases');
         }
     };
 
@@ -49,7 +55,7 @@ export default function CustomerCenter() {
             await RevenueCatUI.presentCustomerCenter();
         } catch (error) {
             console.error("Customer Center error:", error);
-            Alert.alert("Error", "Could not open Customer Center");
+            showAlert("Error", "Could not open Customer Center");
         }
     };
 

@@ -233,34 +233,106 @@ export const getSession = async () => {
     return session;
 };
 
-// Google/Facebook OAuth imports
+// ============================================================
+// NATIVE GOOGLE SIGN-IN (via @react-native-google-signin)
+// Uses signInWithIdToken() — no browser, no redirects needed
+// WRAPPED IN TRY/CATCH: This native module crashes in Expo Go
+// ============================================================
+let GoogleSignin = null;
+let statusCodes = {};
+
+try {
+    const googleModule = require('@react-native-google-signin/google-signin');
+    GoogleSignin = googleModule.GoogleSignin;
+    statusCodes = googleModule.statusCodes || {};
+
+    // Configure Google Sign-In once at module level
+    GoogleSignin.configure({
+        webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+        iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+        offlineAccess: true,
+    });
+    console.log('[OAuth] Google Sign-In configured successfully');
+} catch (e) {
+    console.warn('[OAuth] Google Sign-In native module not available (Expo Go?). Google login disabled.');
+}
+
+// Sign in with Google (native)
+export const signInWithGoogle = async () => {
+    if (!GoogleSignin) {
+        return {
+            session: null,
+            error: new Error('Google Sign-In requires a custom dev build. It is not available in Expo Go.'),
+        };
+    }
+
+    try {
+        console.log('[OAuth] Starting native Google sign-in...');
+
+        // Check for Google Play Services (Android only, no-op on iOS)
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+        // Trigger native Google sign-in UI
+        const signInResult = await GoogleSignin.signIn();
+        console.log('[OAuth] Google sign-in result:', JSON.stringify(signInResult?.data?.user?.email));
+
+        const idToken = signInResult?.data?.idToken;
+
+        if (!idToken) {
+            throw new Error('No ID token returned from Google. Make sure webClientId is configured correctly.');
+        }
+
+        console.log('[OAuth] 🔑 Got idToken, exchanging with Supabase...');
+
+        // Exchange the Google idToken for a Supabase session
+        const { data, error } = await supabase.auth.signInWithIdToken({
+            provider: 'google',
+            token: idToken,
+        });
+
+        if (error) {
+            console.error('[OAuth] Supabase signInWithIdToken error:', error.message);
+            throw error;
+        }
+
+        console.log('[OAuth] ✅ Native Google sign-in successful!');
+        return { session: data.session, error: null };
+    } catch (error) {
+        // Handle specific Google Sign-In error codes
+        if (error?.code === statusCodes.SIGN_IN_CANCELLED) {
+            console.log('[OAuth] ❌ User cancelled Google sign-in');
+            return { session: null, error: new Error('Sign-in cancelled by user') };
+        }
+        if (error?.code === statusCodes.IN_PROGRESS) {
+            console.log('[OAuth] ⏳ Google sign-in already in progress');
+            return { session: null, error: new Error('Sign-in already in progress') };
+        }
+        if (error?.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+            console.error('[OAuth] ❌ Google Play Services not available');
+            return { session: null, error: new Error('Google Play Services is required for Google sign-in') };
+        }
+
+        const errorMessage = error?.message || 'Unknown error';
+        console.error('[OAuth] ❌ Google sign-in error:', errorMessage);
+        return { session: null, error };
+    }
+};
+
+// ============================================================
+// FACEBOOK OAUTH (still uses web-based flow)
+// ============================================================
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 
-WebBrowser.maybeCompleteAuthSession();
-
-// Create proper redirect URI using deep linking
 const createRedirectUri = () => {
-    // In Expo Go, use the exp:// URL for WebBrowser compatibility
-    // In production, use goodfor:// custom scheme
     const expoUrl = Linking.createURL('auth/callback');
     const customScheme = 'goodfor://auth/callback';
-
-    // Check if running in Expo Go (exp:// scheme) or production build
     const isExpoGo = expoUrl.startsWith('exp://');
-    const redirectUri = isExpoGo ? expoUrl : customScheme;
-
-    console.log('[OAuth] Generated redirect URI:', redirectUri);
-    console.log('[OAuth] Is Expo Go:', isExpoGo);
-
-    return redirectUri;
+    return isExpoGo ? expoUrl : customScheme;
 };
 
-// Parse OAuth callback URL for tokens
 const parseOAuthCallback = (url) => {
     let params;
-
-    // Tokens can be in hash (#) or query (?) params depending on provider
     if (url.includes('#')) {
         params = new URLSearchParams(url.split('#')[1]);
     } else if (url.includes('?')) {
@@ -268,115 +340,12 @@ const parseOAuthCallback = (url) => {
     } else {
         throw new Error('No auth parameters found in callback URL');
     }
-
     const access_token = params.get('access_token');
     const refresh_token = params.get('refresh_token');
     const error = params.get('error');
-    const errorDescription = params.get('error_description');
-
-    if (error) {
-        throw new Error(errorDescription || error);
-    }
-
-    if (!access_token) {
-        throw new Error('No access token received from OAuth provider');
-    }
-
+    if (error) throw new Error(params.get('error_description') || error);
+    if (!access_token) throw new Error('No access token received');
     return { access_token, refresh_token };
-};
-
-// Helper function to add timeout to async operations
-const withTimeout = (promise, timeoutMs, errorMessage) => {
-    return Promise.race([
-        promise,
-        new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(errorMessage)), timeoutMs)
-        )
-    ]);
-};
-
-// Sign in with Google OAuth
-export const signInWithGoogle = async () => {
-    try {
-        const redirectUrl = createRedirectUri();
-        console.log('[OAuth] Starting Google sign-in with redirect:', redirectUrl);
-        console.log('[OAuth] ⚠️ Note: In Expo Go, OAuth may require manual handling via AuthContext deep link listener');
-
-        // Get the OAuth URL from Supabase
-        const { data, error } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: redirectUrl,
-                skipBrowserRedirect: true, // We handle the browser ourselves
-            },
-        });
-
-        if (error) throw error;
-        if (!data.url) throw new Error('No OAuth URL returned from Supabase');
-
-        console.log('[OAuth] Opening Google OAuth URL...');
-        const browserStartTime = Date.now();
-
-        // Use WebBrowser for OAuth - it properly handles redirects
-        const result = await WebBrowser.openAuthSessionAsync(
-            data.url,
-            redirectUrl,
-            {
-                showInRecents: true,
-                preferEphemeralSession: false,
-            }
-        );
-
-        const browserDuration = Date.now() - browserStartTime;
-        console.log(`[OAuth] Browser closed after ${browserDuration}ms with result type: ${result.type}`);
-
-        if (result.type === 'success') {
-            const { url } = result;
-            console.log('[OAuth] ✅ Callback URL received:', url?.substring(0, 100) + '...');
-
-            // Parse tokens from callback URL
-            const { access_token, refresh_token } = parseOAuthCallback(url);
-
-            if (!access_token) {
-                throw new Error('No access token found in OAuth callback URL');
-            }
-
-            console.log('[OAuth] 🔑 Tokens extracted, setting session...');
-
-            // Set the session with the tokens
-            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-                access_token,
-                refresh_token: refresh_token || '',
-            });
-
-            if (sessionError) throw sessionError;
-
-            console.log('[OAuth] ✅ Google sign-in successful via WebBrowser!');
-            return { session: sessionData.session, error: null };
-        } else if (result.type === 'cancel') {
-            console.log('[OAuth] ❌ User cancelled Google sign-in');
-            return { session: null, error: new Error('Sign-in cancelled by user') };
-        } else if (result.type === 'dismiss') {
-            console.log('[OAuth] ⚠️ Browser dismissed - OAuth may complete via deep link handler');
-            // In Expo Go, the browser might dismiss but OAuth continues via deep link
-            // Return null to let AuthContext handle it
-            return { session: null, error: null };
-        }
-
-        console.log('[OAuth] ❌ Unexpected result type:', result.type);
-        return { session: null, error: new Error('OAuth flow failed with unexpected result') };
-    } catch (error) {
-        const errorMessage = error?.message || 'Unknown error';
-        console.error('[OAuth] ❌ Google sign-in error:', errorMessage);
-
-        // If timeout occurred in Expo Go, return special indicator
-        if (errorMessage.includes('timed out') && errorMessage.includes('Expo Go')) {
-            console.log('[OAuth] ℹ️ Browser timeout in Expo Go - AuthContext will handle callback via deep link');
-            return { session: null, error: null }; // Let deep link handler take over
-        }
-
-        return { session: null, error };
-    }
 };
 
 // Sign in with Facebook OAuth

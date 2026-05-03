@@ -1,15 +1,29 @@
-import { View, Text, Image, Animated } from "react-native";
-import { useEffect, useRef } from "react";
+import { View, Text, Image, Animated, Platform, Dimensions, Linking } from "react-native";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { colors } from "@/constants/theme";
+import { ScanningRings } from '@/components/AnimatedEffects';
+import LottieView from 'lottie-react-native';
+import { useAuth } from '@/contexts/AuthContext';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function Splash() {
   const router = useRouter();
+  const { user, profile } = useAuth();
   const progressAnim = useRef(new Animated.Value(0)).current;
   const dotAnim = useRef(new Animated.Value(0)).current;
+  const mascotAnim = useRef(new Animated.Value(0)).current;
+  const lottieRef = useRef(null);
+  const cleanupRef = useRef(null);
 
   useEffect(() => {
+    // Manually trigger Lottie animation (autoPlay is unreliable on Android)
+    setTimeout(() => {
+      lottieRef.current?.play();
+    }, 100);
+
     // Animate progress bar
     Animated.timing(progressAnim, {
       toValue: 1,
@@ -33,12 +47,53 @@ export default function Splash() {
       ]),
     ).start();
 
-    // Navigate to onboarding after 2.5 seconds
-    const timer = setTimeout(() => {
-      router.replace("/onboarding/welcome");
-    }, 2500);
+    // Fade in mascot after a short delay
+    Animated.timing(mascotAnim, {
+      toValue: 1,
+      duration: 800,
+      delay: 400,
+      useNativeDriver: true,
+    }).start();
 
-    return () => clearTimeout(timer);
+    // Check for deep-link from widget
+    const checkDeepLink = async () => {
+      try {
+        const initialUrl = await Linking.getInitialURL();
+        if (initialUrl && initialUrl.includes('goodfor://scan')) {
+          // Widget "Scan Now" was tapped — go straight to scanner
+          setTimeout(() => {
+            if (user && profile) {
+              router.replace('/(tabs)/scan');
+            } else {
+              router.replace('/onboarding/welcome');
+            }
+          }, 1500); // Shorter delay for widget launch
+          return true;
+        }
+      } catch (e) {
+        console.log('[Splash] Deep-link check failed:', e.message);
+      }
+      return false;
+    };
+
+    // Navigate after 2.5 seconds — home for logged-in, onboarding for new users
+    checkDeepLink().then((handled) => {
+      if (!handled) {
+        const timer = setTimeout(() => {
+          if (user && profile) {
+            router.replace('/(tabs)/home');
+          } else {
+            router.replace('/onboarding/welcome');
+          }
+        }, 2500);
+        // Store cleanup in ref-like closure
+        cleanupRef.current = () => clearTimeout(timer);
+      }
+    });
+
+    return () => {
+      if (cleanupRef.current) cleanupRef.current();
+    };
   }, []);
 
   const progressWidth = progressAnim.interpolate({
@@ -92,13 +147,17 @@ export default function Splash() {
 
       {/* Main content */}
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <Image
-          source={{
-            uri: "https://ggrhecslgdflloszjkwl.supabase.co/storage/v1/object/public/user-assets/onAkNUUAGm7/ai/GoodFor-1-x16DQfFL43Z.png",
-          }}
-          style={{ width: 200, height: 48 }}
-          resizeMode="contain"
-        />
+        <View style={{ width: '100%', alignItems: 'center', overflow: 'visible' }}>
+          <LottieView
+            ref={lottieRef}
+            source={require('../assets/animations/logo.json')}
+            loop
+            style={{ width: SCREEN_WIDTH * 0.85, height: (SCREEN_WIDTH * 0.85) * 0.25, alignSelf: 'center' }}
+            resizeMode="contain"
+            renderMode={Platform.OS === 'android' ? 'SOFTWARE' : 'AUTOMATIC'}
+          />
+        </View>
+
         <Text
           style={{
             marginTop: 16,

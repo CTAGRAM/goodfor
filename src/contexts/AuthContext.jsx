@@ -265,6 +265,15 @@ export function AuthProvider({ children }) {
                         avatar_url: metadata.avatar_url || metadata.picture || null,
                         age_group: 'adult',
                         is_profile_completed: false,
+                        // Seed onboarding personalisation from signup metadata
+                        ...(metadata.user_age_group && { user_age_group: metadata.user_age_group }),
+                        ...(metadata.user_gender && { user_gender: metadata.user_gender }),
+                        ...(metadata.diet_preference && { diet_preference: metadata.diet_preference }),
+                        ...(metadata.health_concerns && { health_concerns: typeof metadata.health_concerns === 'string' ? JSON.parse(metadata.health_concerns) : metadata.health_concerns }),
+                        ...(metadata.processed_knowledge && { processed_knowledge: metadata.processed_knowledge }),
+                        ...(metadata.ingredient_habit && { ingredient_habit: metadata.ingredient_habit }),
+                        ...(metadata.referral_source && { referral_source: metadata.referral_source }),
+                        ...(metadata.info_preferences && { info_preferences: typeof metadata.info_preferences === 'string' ? JSON.parse(metadata.info_preferences) : metadata.info_preferences }),
                     };
 
                     console.log('[AuthContext] Creating profile with:', {

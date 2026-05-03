@@ -212,9 +212,18 @@ export function mightBeBeautyProduct(barcode) {
         '301', '302', '303', // L'Oréal
         '304', '305',       // Unilever personal care
         '360',              // Johnson & Johnson
-        '890',              // Korean cosmetics (K-beauty)
-        '880',              // Japanese cosmetics
+        '890', '880',       // Korean cosmetics (K-beauty) / Japanese cosmetics
         '871',              // Netherlands personal care
+        '888',              // Thai cosmetics
+        '869',              // Turkish cosmetics
+        '602',              // Beauty brands (The Ordinary, etc.)
+        '309',              // Garnier, L'Oréal Paris
+        '400',              // Nivea, Beiersdorf
+        '401',              // Dove, Unilever
+        '501',              // CeraVe
+        '887',              // COSRX, Korean brands
+        '884',              // Innisfree, Korean brands
+        '883',              // Etude House, Korean brands
     ];
 
     return beautyPrefixes.some(prefix => barcode.startsWith(prefix));

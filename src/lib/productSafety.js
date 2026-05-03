@@ -309,26 +309,44 @@ function checkDietaryRestrictions(product, restrictions = []) {
     if (!restrictions.length) return issues;
 
     const ingredientsLower = (product.ingredientsText || '').toLowerCase();
+    // Also check product name and categories for meat-type products
+    const productNameLower = (product.name || '').toLowerCase();
+    const categoriesLower = (product.categories || []).map(c => c.toLowerCase()).join(' ');
+    const fullText = `${ingredientsLower} ${productNameLower} ${categoriesLower}`;
 
     const dietaryChecks = {
         'vegetarian': {
-            forbidden: ['gelatin', 'meat', 'chicken', 'beef', 'pork', 'fish', 'anchovy'],
+            forbidden: ['gelatin', 'meat', 'chicken', 'beef', 'pork', 'fish', 'anchovy', 'lard', 'tallow', 'rennet', 'collagen', 'bone',
+                'liver', 'offal', 'pate', 'pâté', 'brawn', 'tripe', 'blood pudding', 'black pudding', 'dripping'],
             severity: SAFETY_LEVELS.AVOID,
             reason: 'Contains non-vegetarian ingredients',
         },
         'vegan': {
-            forbidden: ['milk', 'egg', 'honey', 'gelatin', 'meat', 'fish', 'butter', 'cheese', 'cream', 'whey', 'casein'],
+            forbidden: ['milk', 'egg', 'honey', 'gelatin', 'meat', 'fish', 'butter', 'cheese', 'cream', 'whey', 'casein', 'lard', 'tallow', 'beeswax', 'shellac', 'carmine', 'lanolin', 'collagen',
+                'liver', 'offal', 'pate', 'pâté', 'brawn', 'tripe', 'blood pudding', 'black pudding', 'dripping'],
             severity: SAFETY_LEVELS.AVOID,
             reason: 'Contains animal-derived ingredients',
         },
         'halal': {
-            forbidden: ['pork', 'lard', 'gelatin', 'alcohol', 'wine'],
-            severity: SAFETY_LEVELS.AVOID,
-            reason: 'May contain non-halal ingredients',
+            forbidden: [
+                'pork', 'lard', 'gelatin', 'alcohol', 'wine', 'beer', 'rum', 'ethanol',
+                'bacon', 'ham', 'sausage', 'pepperoni', 'chorizo', 'salami', 'prosciutto',
+                'pancetta', 'mortadella', 'sopressata', 'bratwurst',
+                'pig', 'swine', 'boar',
+                'rennet', 'collagen', 'carmine', 'cochineal',
+                'e120', 'e441', 'e542', 'e904',
+                // Pork-derived products often not explicitly labelled as pork
+                'pate', 'pâté', 'liver', 'offal', 'blood', 'black pudding',
+                'brawn', 'head cheese', 'tripe', 'crackling', 'rind', 'dripping',
+                'liverwurst', 'leberwurst', 'terrine',
+            ],
+            severity: SAFETY_LEVELS.CRITICAL,
+            reason: 'Contains non-halal ingredients — not suitable for halal diet',
         },
         'kosher': {
-            forbidden: ['pork', 'shellfish', 'shrimp', 'crab', 'lobster'],
-            severity: SAFETY_LEVELS.CAUTION,
+            forbidden: ['pork', 'shellfish', 'shrimp', 'crab', 'lobster', 'lard', 'bacon', 'ham', 'sausage',
+                'pate', 'pâté', 'liver', 'offal', 'blood pudding', 'black pudding'],
+            severity: SAFETY_LEVELS.AVOID,
             reason: 'May contain non-kosher ingredients',
         },
         'gluten-free': {
@@ -344,17 +362,21 @@ function checkDietaryRestrictions(product, restrictions = []) {
     };
 
     restrictions.forEach(restriction => {
+        // Case-insensitive lookup (profile stores 'Halal', checks key is 'halal')
         const check = dietaryChecks[restriction.toLowerCase()];
         if (check) {
             const violated = check.forbidden.some(ingredient =>
-                ingredientsLower.includes(ingredient)
+                fullText.includes(ingredient)
             );
             if (violated) {
+                const matchedIngredients = check.forbidden.filter(ingredient =>
+                    fullText.includes(ingredient)
+                );
                 issues.push({
                     type: 'dietary_restriction',
                     name: restriction,
                     severity: check.severity,
-                    reason: check.reason,
+                    reason: `${check.reason} (detected: ${matchedIngredients.join(', ')})`,
                     isPersonal: true,
                 });
             }
