@@ -81,40 +81,32 @@ Deno.serve(async (req) => {
             }
         }
 
-        // 4. Create the shopping list
+        // 4. Map the ingredients to the format expected by the frontend
+        const items = Array.from(neededIngredients.values()).map(ing => ({
+            name: ing.name,
+            quantity: ing.quantity,
+            unit: ing.unit,
+            category: ing.category,
+            checked: false,
+            recipe_source: true
+        }));
+
+        // 5. Create the shopping list
         const { data: list, error: listError } = await supabaseClient
             .from('shopping_lists')
             .insert({
                 user_id: userId,
-                name: `List generated from ${recipeIds.length} recipes`,
+                title: `List generated from ${recipeIds.length} recipes`,
                 recipe_ids: recipeIds,
+                items: items,
             })
             .select()
             .single();
 
         if (listError) throw listError;
 
-        // 5. Add items to list
-        const itemsToInsert = Array.from(neededIngredients.values()).map(ing => ({
-            list_id: list.id,
-            ingredient_name: ing.name,
-            quantity: ing.quantity,
-            unit: ing.unit,
-            category: ing.category,
-            is_bought: false,
-            safety_score: null
-        }));
-
-        if (itemsToInsert.length > 0) {
-            const { error: itemsError } = await supabaseClient
-                .from('shopping_list_items')
-                .insert(itemsToInsert);
-
-            if (itemsError) throw itemsError;
-        }
-
         return new Response(
-            JSON.stringify({ success: true, listId: list.id, itemCount: itemsToInsert.length }),
+            JSON.stringify({ success: true, listId: list.id, itemCount: items.length }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
         );
     } catch (error) {

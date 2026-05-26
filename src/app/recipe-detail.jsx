@@ -47,6 +47,7 @@ export default function RecipeDetail() {
   const [checkedIngredients, setCheckedIngredients] = useState(new Set());
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [isGeneratingSwaps, setIsGeneratingSwaps] = useState(false);
+  const [swapsMap, setSwapsMap] = useState({});
 
   const fetchRecipe = async () => {
     try {
@@ -85,10 +86,19 @@ export default function RecipeDetail() {
   const handleGetSwaps = async () => {
     try {
       setIsGeneratingSwaps(true);
-      await getHealthierSwaps(id);
+      const newSwaps = await getHealthierSwaps(id);
+      
+      const map = {};
+      newSwaps.forEach(swap => {
+        if (swap.original_ingredient_id) {
+          map[swap.original_ingredient_id] = swap;
+        }
+      });
+      setSwapsMap(map);
+
       Alert.alert(
         "Healthier Swaps Found",
-        "We found some healthier alternatives for this recipe!"
+        `We found ${newSwaps.length} healthier alternatives for this recipe!`
       );
     } catch (error) {
       Alert.alert("Error", error.message || "Failed to generate swaps.");
@@ -281,60 +291,74 @@ export default function RecipeDetail() {
             {ingredients.map((item, index) => {
               const isChecked = checkedIngredients.has(index);
               const hasSwap = item.health_score != null && item.health_score < 50;
+              const suggestedSwap = swapsMap[item.id];
               return (
-                <TouchableOpacity
-                  key={item.id || index}
-                  activeOpacity={0.7}
-                  onPress={() => toggleIngredient(index)}
-                  style={[
-                    styles.ingRow,
-                    index === ingredients.length - 1 && styles.ingRowLast,
-                  ]}
-                >
-                  {/* Checkbox */}
-                  <View
+                <View key={item.id || index}>
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => toggleIngredient(index)}
                     style={[
-                      styles.ingCheck,
-                      isChecked && styles.ingCheckChecked,
+                      styles.ingRow,
+                      index === ingredients.length - 1 && !suggestedSwap && styles.ingRowLast,
                     ]}
                   >
-                    {isChecked && <Check size={12} color="#fff" />}
-                  </View>
+                    {/* Checkbox */}
+                    <View
+                      style={[
+                        styles.ingCheck,
+                        isChecked && styles.ingCheckChecked,
+                      ]}
+                    >
+                      {isChecked && <Check size={12} color="#fff" />}
+                    </View>
 
-                  {/* Text */}
-                  <Text
-                    style={[
-                      styles.ingText,
-                      isChecked && styles.ingTextStruck,
-                    ]}
-                  >
+                    {/* Text */}
                     <Text
                       style={[
-                        styles.ingQty,
+                        styles.ingText,
                         isChecked && styles.ingTextStruck,
                       ]}
                     >
-                      {item.quantity ? `${item.quantity} ` : ""}
-                      {item.unit ? `${item.unit} ` : ""}
+                      <Text
+                        style={[
+                          styles.ingQty,
+                          isChecked && styles.ingTextStruck,
+                        ]}
+                      >
+                        {item.quantity ? `${item.quantity} ` : ""}
+                        {item.unit ? `${item.unit} ` : ""}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.ingName,
+                          isChecked && styles.ingTextStruck,
+                        ]}
+                      >
+                        {item.name}
+                      </Text>
                     </Text>
-                    <Text
-                      style={[
-                        styles.ingName,
-                        isChecked && styles.ingTextStruck,
-                      ]}
-                    >
-                      {item.name}
-                    </Text>
-                  </Text>
 
-                  {/* Swap badge */}
-                  {hasSwap && (
-                    <View style={styles.swapBadge}>
-                      <RefreshCw size={10} color="#B16F00" />
-                      <Text style={styles.swapBadgeText}>Swap</Text>
+                    {/* Swap badge */}
+                    {hasSwap && !suggestedSwap && (
+                      <View style={styles.swapBadge}>
+                        <RefreshCw size={10} color="#B16F00" />
+                        <Text style={styles.swapBadgeText}>Swap</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+
+                  {/* Swap Suggestion Render */}
+                  {suggestedSwap && (
+                    <View style={styles.swapSuggestionBox}>
+                      <View style={styles.swapSuggestionHeader}>
+                        <Sparkles size={14} color="#059669" />
+                        <Text style={styles.swapSuggestionTitle}>Suggested Swap</Text>
+                      </View>
+                      <Text style={styles.swapSuggestionName}>{suggestedSwap.suggestion}</Text>
+                      <Text style={styles.swapSuggestionReason}>{suggestedSwap.reason}</Text>
                     </View>
                   )}
-                </TouchableOpacity>
+                </View>
               );
             })}
           </View>
@@ -728,6 +752,38 @@ const styles = StyleSheet.create({
     color: "#B16F00",
     letterSpacing: 0.4,
     textTransform: "uppercase",
+  },
+  swapSuggestionBox: {
+    backgroundColor: '#ECFDF5',
+    padding: 12,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  swapSuggestionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  swapSuggestionTitle: {
+    fontSize: 12,
+    fontFamily: fonts.sansBold,
+    color: '#059669',
+    textTransform: 'uppercase',
+  },
+  swapSuggestionName: {
+    fontSize: 14,
+    fontFamily: fonts.sansBold,
+    color: '#065F46',
+    marginBottom: 2,
+  },
+  swapSuggestionReason: {
+    fontSize: 13,
+    fontFamily: fonts.sansMedium,
+    color: '#047857',
   },
 
   // ─── Instructions ──────────────────────────────────────────
