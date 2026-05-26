@@ -67,6 +67,15 @@ ${pantryItems.map(i => `- ${i.name} ${i.quantity ? `(${i.quantity} ${i.unit || '
                   "difficulty": "easy|medium|hard",
                   "prep_time_minutes": number,
                   "cook_time_minutes": number,
+                  "ingredients": [
+                    {
+                      "name": "Ingredient name",
+                      "quantity": number or null,
+                      "unit": "string or null",
+                      "category": "produce|dairy|meat|grains|pantry_staple|other"
+                    }
+                  ],
+                  "instructions": ["step 1 text", "step 2 text", ...],
                   "missing_ingredients": ["list", "of", "things", "they", "need", "to", "buy"]
                 }
               ]

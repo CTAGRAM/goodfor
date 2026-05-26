@@ -40,7 +40,6 @@ export default function RecipeDiscover() {
         if (isSaving) return;
         try {
             setIsSaving(true);
-            // Save a placeholder recipe to the database to view it
             const newRecipe = await saveRecipe({
                 user_id: user.id,
                 title: recipeIdea.title,
@@ -48,7 +47,8 @@ export default function RecipeDiscover() {
                 prep_time_minutes: recipeIdea.prep_time_minutes,
                 cook_time_minutes: recipeIdea.cook_time_minutes,
                 difficulty: recipeIdea.difficulty,
-                // We don't have full ingredients or instructions from this endpoint yet
+                ingredients: recipeIdea.ingredients || [],
+                instructions: recipeIdea.instructions || [],
             });
             router.push(`/recipe-detail?id=${newRecipe.id}`);
         } catch (error) {

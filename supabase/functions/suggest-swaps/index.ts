@@ -34,37 +34,66 @@ Deno.serve(async (req) => {
 
         if (ingError) throw ingError;
 
-        // Note: In production we would use OpenAI or the safety database to find swaps.
-        // For this demo implementation we will generate dummy swaps for a few ingredients.
-        const swaps = [];
-        
-        for (const ing of ingredients) {
-            const nameLower = ing.name.toLowerCase();
-            if (nameLower.includes('sugar') || nameLower.includes('syrup')) {
-                swaps.push({
-                    original_ingredient_id: ing.id,
-                    original_name: ing.name,
-                    suggestion: 'Stevia or Monk Fruit Sweetener',
-                    reason: 'Zero calories and low glycemic impact.',
-                    safetyImprovement: 20
-                });
-            } else if (nameLower.includes('butter') || nameLower.includes('oil')) {
-                swaps.push({
-                    original_ingredient_id: ing.id,
-                    original_name: ing.name,
-                    suggestion: 'Avocado Oil or Ghee',
-                    reason: 'Healthier fat profile and higher smoke point.',
-                    safetyImprovement: 15
-                });
-            } else if (nameLower.includes('flour')) {
-                swaps.push({
-                    original_ingredient_id: ing.id,
-                    original_name: ing.name,
-                    suggestion: 'Almond Flour or Oat Flour',
-                    reason: 'Lower carb and gluten-free alternatives.',
-                    safetyImprovement: 10
-                });
-            }
+        const openAiKey = Deno.env.get("EXPO_PUBLIC_OPENAI_API_KEY");
+        if (!openAiKey) {
+            throw new Error("OpenAI API key not configured");
+        }
+
+        let swaps = [];
+        if (ingredients && ingredients.length > 0) {
+            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${openAiKey}`,
+                },
+                body: JSON.stringify({
+                    model: "gpt-4o",
+                    response_format: { type: "json_object" },
+                    messages: [
+                        {
+                            role: "system",
+                            content: `You are a healthy nutrition AI assistant. Given a list of recipe ingredients (with their database IDs), analyze them and suggest healthier swaps for ingredients that can be improved (e.g., refined sugar, butter, heavy oils, white flour, high-sodium sauces, processed meats).
+                            For each suggestion, return:
+                            - original_ingredient_id: the exact ID of the original ingredient
+                            - original_name: the name of the original ingredient
+                            - suggestion: a healthier alternative (e.g., Stevia, Avocado Oil, Almond Flour)
+                            - reason: a concise explanation of why it is healthier
+                            - safetyImprovement: an estimate of the improvement score (e.g., between 5 and 30)
+
+                            Return a JSON object structured like this:
+                            {
+                              "swaps": [
+                                {
+                                  "original_ingredient_id": "string",
+                                  "original_name": "string",
+                                  "suggestion": "string",
+                                  "reason": "string",
+                                  "safetyImprovement": number
+                                }
+                              ]
+                            }
+                            Do NOT suggest swaps for naturally healthy ingredients like fresh vegetables, clean proteins, water, or spices.`
+                        },
+                        {
+                            role: "user",
+                            content: JSON.stringify({
+                                ingredients: ingredients.map(ing => ({
+                                    id: ing.id,
+                                    name: ing.name,
+                                    category: ing.category
+                                }))
+                            })
+                        }
+                    ]
+                })
+            });
+
+            const data = await response.json();
+            if (data.error) throw new Error(data.error.message);
+            
+            const resultJson = JSON.parse(data.choices[0].message.content);
+            swaps = resultJson.swaps || [];
         }
 
         return new Response(
