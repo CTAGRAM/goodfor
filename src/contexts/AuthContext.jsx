@@ -85,7 +85,7 @@ export function AuthProvider({ children }) {
         // This prevents the race condition where TOKEN_REFRESHED fires
         // before getSession resolves, causing a duplicate loadProfile call.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (_event, session) => {
+            (_event, session) => {
                 console.log('[AuthContext] 🔄 Auth state changed:', _event);
 
                 // Skip events that are handled by getSession() above
@@ -98,7 +98,10 @@ export function AuthProvider({ children }) {
                 if (session?.user) {
                     // Only load profile for real auth events (SIGNED_IN, USER_UPDATED)
                     if (!isLoadingProfile.current) {
-                        await loadProfile(session.user.id);
+                        // Defer to prevent gotrue session deadlock in React Native
+                        setTimeout(() => {
+                            loadProfile(session.user.id);
+                        }, 0);
                     } else {
                         console.log('[AuthContext] ⏭️ Skipping loadProfile - already in progress');
                     }

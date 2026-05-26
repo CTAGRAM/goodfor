@@ -35,6 +35,7 @@ import {
     Sparkles,
     Award,
     ShoppingCart,
+    Refrigerator,
     X
 } from "lucide-react-native";
 import { BlurView } from 'expo-blur';
@@ -52,6 +53,7 @@ import { isProductFavorite, addToFavorites, removeFromFavorites } from "@/lib/pr
 import { hapticLight, hapticMedium, hapticSelection, hapticSuccess } from "@/lib/haptics";
 import { ConfettiBurst } from '@/components/AnimatedEffects';
 import { getOrCreateTodayBasket, addToBasket as addProductToBasket, replaceBasketItem } from '@/lib/basketService';
+import { addFromScan } from '@/lib/pantryService';
 import { useAlert } from '@/contexts/AlertContext';
 
 export default function ProductSummary() {
@@ -185,13 +187,8 @@ export default function ProductSummary() {
         }
     }, [selectedMember, product.barcode]);
 
-    // Determine if this is a beauty/cosmetic product — broad detection
-    const BEAUTY_KEYWORDS = /beauty|cosmetic|shampoo|soap|skin\s?care|skincare|hair\s?care|haircare|lotion|cream|face|body\s?wash|hygiene|moisturi[sz]|serum|cleanser|conditioner|sunscreen|spf|makeup|mascara|lipstick|foundation|perfume|fragrance|deodorant|toothpaste|dental|mouthwash|exfoliat|toner|scrub/i;
-    const isBeautyProduct = product.productType === 'BEAUTY' || safety.productType === 'BEAUTY' ||
-        (typeof product.category === 'string' && product.category.toLowerCase().includes('beauty')) ||
-        (product.categories_tags || []).some(t => BEAUTY_KEYWORDS.test(t)) ||
-        BEAUTY_KEYWORDS.test(product.product_name || product.name || '') ||
-        BEAUTY_KEYWORDS.test((product.categories || []).join(' '));
+    // All products are now food-only (beauty code removed)
+    const isBeautyProduct = false;
 
     // Ensure required objects exist for UI calculations
     if (!product.nutriments) product.nutriments = {};
@@ -258,13 +255,13 @@ export default function ProductSummary() {
     const servingSize = servingSizeData.size;
     const isDefaultServing = servingSizeData.isDefault;
     const servingUnit = servingSizeData.unit || portionUnit;
-    // Show portion toggle for ALL food products (User requested fix for 100g bias)
-    const hasServingSize = !isBeautyProduct;
+    const hasServingSize = true;
 
     // Calculate value per serving
     const getPortionValue = (valuePer100g) => {
-        if (!showPerServing || !servingSize) return valuePer100g;
-        return (valuePer100g * servingSize) / 100;
+        const val = Number(valuePer100g) || 0;
+        if (!showPerServing || !servingSize) return val;
+        return (val * servingSize) / 100;
     };
 
     // Get display label for current portion mode
@@ -288,19 +285,10 @@ export default function ProductSummary() {
         }
     };
 
-    const safetyConfig = getSafetyConfig();
-    const SafetyIcon = safetyConfig.icon;
+    const safetyConfig = getSafetyConfig() || { color: colors.chart1, icon: CheckCircle, label: 'Good', description: 'Good to consume' };
+    const SafetyIcon = safetyConfig.icon || CheckCircle;
 
     const getCategory = () => {
-        // Check if it's a beauty product first
-        if (isBeautyProduct) {
-            // Use product subtype if available (SKINCARE, HAIRCARE, etc.)
-            if (product.productSubtype && product.productSubtype !== 'OTHER') {
-                return product.productSubtype.charAt(0) + product.productSubtype.slice(1).toLowerCase().replace('_', ' ');
-            }
-            return 'Beauty Product';
-        }
-        // Food product
         if (product.categories && product.categories.length > 0) {
             return product.categories[0].replace('en:', '').replace(/-/g, ' ');
         }
@@ -350,11 +338,7 @@ export default function ProductSummary() {
             icon: Shield,
             iconColor: (safety.fragranceAllergenCount || product.allergens?.length || 0) > 0 ? colors.chart2 : colors.chart1,
             title: 'Allergen Status',
-            subtitle: isBeautyProduct
-                ? (safety.fragranceAllergenCount > 0
-                    ? `${safety.fragranceAllergenCount} fragrance allergen(s) detected`
-                    : 'No fragrance allergens detected')
-                : (product.allergens?.length > 0
+            subtitle: (product.allergens?.length > 0
                     ? `Contains ${product.allergens.length} allergen(s)`
                     : 'No major allergens detected'),
         },
@@ -363,7 +347,7 @@ export default function ProductSummary() {
     // NOVA Processing Level for food products
     const getNovaDisplay = () => {
         const novaGroup = safety.novaGroup?.group || product.novaGroup;
-        if (!novaGroup || isBeautyProduct) return null;
+        if (!novaGroup) return null;
 
         const novaLabels = {
             1: { label: 'Unprocessed', color: colors.chart1, icon: 'apple' },
@@ -377,8 +361,6 @@ export default function ProductSummary() {
 
     // Consumption frequency guidance — anchored to safety level to prevent contradictions
     const getConsumptionGuidance = () => {
-        if (isBeautyProduct) return null;
-
         const safetyLevel = safety.safety;
         const nutriGrade = safety.nutriScore?.grade?.toUpperCase() || nutriScoreInfo.grade;
         const novaGroup = safety.novaGroup?.group || product.novaGroup;
@@ -404,16 +386,14 @@ export default function ProductSummary() {
 
     // Fat Quality Breakdown - Phase 3
     const getFatQuality = () => {
-        if (isBeautyProduct) return null;
+        const totalFat = Number(product.nutriments?.fat || product.nutriments?.fat_100g || 0);
+        const saturatedFat = Number(product.nutriments?.['saturated-fat'] || product.nutriments?.['saturated-fat_100g'] || 0);
+        const transFat = Number(product.nutriments?.['trans-fat'] || product.nutriments?.['trans-fat_100g'] || 0);
 
-        const totalFat = product.nutriments?.fat || product.nutriments?.fat_100g || 0;
-        const saturatedFat = product.nutriments?.['saturated-fat'] || product.nutriments?.['saturated-fat_100g'] || 0;
-        const transFat = product.nutriments?.['trans-fat'] || product.nutriments?.['trans-fat_100g'] || 0;
-
-        if (totalFat <= 0) return null;
+        if (isNaN(totalFat) || totalFat <= 0) return null;
 
         const unsaturatedFat = Math.max(0, totalFat - saturatedFat - transFat);
-        const saturatedRatio = (saturatedFat / totalFat) * 100;
+        const saturatedRatio = totalFat > 0 ? (saturatedFat / totalFat) * 100 : 0;
 
         let quality = 'good';
         let label = 'Healthy fat profile';
@@ -434,23 +414,21 @@ export default function ProductSummary() {
         }
 
         return {
-            totalFat: totalFat.toFixed(1),
-            saturatedFat: saturatedFat.toFixed(1),
-            unsaturatedFat: unsaturatedFat.toFixed(1),
-            transFat: transFat > 0 ? transFat.toFixed(1) : null,
+            totalFat,
+            saturatedFat,
+            unsaturatedFat,
+            transFat: transFat > 0 ? transFat : null,
             quality,
             label,
             color,
             saturatedPercent: Math.round(saturatedRatio),
-            unsaturatedPercent: Math.round(100 - saturatedRatio - (transFat / totalFat * 100 || 0)),
+            unsaturatedPercent: Math.round(Math.max(0, 100 - saturatedRatio - (transFat / totalFat * 100 || 0))),
         };
     };
     const fatQuality = getFatQuality();
 
     // Phase 4: Environmental Impact helper — V4: uses real OFF data when available
     const getEnvironmentalImpact = () => {
-        if (isBeautyProduct) return null;
-
         // Get Eco-Score if available (must be valid grade A-E)
         const rawEcoScore = product.ecoScore?.toUpperCase() || product.eco_score?.toUpperCase() || null;
         const validGrades = ['A', 'B', 'C', 'D', 'E'];
@@ -539,20 +517,7 @@ export default function ProductSummary() {
     };
     const envImpact = getEnvironmentalImpact();
 
-    // Beauty Safety Analysis card data (replaces Nutri-Score for beauty products)
-    const getBeautySafetyAnalysis = () => {
-        if (!isBeautyProduct) return null;
-        const ingredientCount = product.ingredientsText ? product.ingredientsText.split(',').length : 0;
-        const ingredientSafety = Math.round(safety.safeScore || 70);
-        const allergenRisk = (safety.fragranceAllergenCount || 0) > 3 ? 'High' :
-            (safety.fragranceAllergenCount || 0) > 0 ? 'Moderate' : 'Low';
-        const allergenRiskColor = allergenRisk === 'High' ? colors.chart3 :
-            allergenRisk === 'Moderate' ? colors.chart2 : colors.chart1;
-        const clinicalScore = safety.clinicalEvidence || Math.min(ingredientCount, 15);
-        const regulatoryStatus = safety.regulatoryCompliance || 'Compliant';
-        return { ingredientSafety, allergenRisk, allergenRiskColor, clinicalScore, ingredientCount, regulatoryStatus };
-    };
-    const beautySafety = getBeautySafetyAnalysis();
+
 
     // Plain-English Verdict - Phase 3 (V4: respects safety level to avoid contradictions)
     const getPlainEnglishVerdict = () => {
@@ -567,75 +532,47 @@ export default function ProductSummary() {
         // V4 FIX: Use safety level as PRIMARY anchor to prevent verdict contradicting the safety badge
         // The safety badge (Safe/Caution/Avoid/Unsafe) is the hero — verdict MUST align with it.
 
-        if (isBeautyProduct) {
-            if (safetyLevel === SAFETY_LEVELS.CRITICAL || safetyLevel === SAFETY_LEVELS.AVOID) {
-                return {
-                    verdict: 'Not recommended for your profile',
-                    detail: topConcern
-                        ? `${productName} contains ${topConcern.toLowerCase()}. Consider safer alternatives.`
-                        : 'Contains ingredients that conflict with your profile settings.',
-                    emoji: '', color: colors.chart3
-                };
-            } else if (safetyLevel === SAFETY_LEVELS.CAUTION) {
-                return {
-                    verdict: 'Use with caution',
-                    detail: safety.fragranceAllergenCount > 0
-                        ? `Contains ${safety.fragranceAllergenCount} fragrance allergen(s). Patch test before regular use.`
+        // Food products — safety level is the anchor, nutri data provides detail
+        if (safetyLevel === SAFETY_LEVELS.CRITICAL || safetyLevel === SAFETY_LEVELS.AVOID) {
+            return {
+                verdict: 'Avoid based on your profile',
+                detail: topConcern
+                    ? `${topConcern} detected. Not suitable for your dietary requirements.`
+                    : `This product conflicts with your health preferences.${novaGroup >= 4 ? ' Ultra-processed (NOVA 4).' : ''}`,
+                icon: 'alert', color: colors.chart3
+            };
+        } else if (safetyLevel === SAFETY_LEVELS.CAUTION) {
+            // Caution — never say "Enjoy" or "Good for regular consumption"
+            const highNutrients = [
+                safety.nutriScore?.breakdown?.negatives?.sodium?.points > 5 ? 'sodium' : '',
+                safety.nutriScore?.breakdown?.negatives?.sugars?.points > 5 ? 'sugars' : '',
+                safety.nutriScore?.breakdown?.negatives?.saturates?.points > 5 ? 'saturated fats' : ''
+            ].filter(Boolean);
+            return {
+                verdict: 'Consume with awareness',
+                detail: novaGroup >= 4
+                    ? `Ultra-processed (NOVA 4). Best as an occasional treat, not a staple.`
+                    : highNutrients.length > 0
+                        ? `Contains elevated ${highNutrients.join(', ')}. Watch portion sizes.`
                         : topConcern
-                            ? `${topConcern} may not suit sensitive skin. Monitor for irritation.`
-                            : 'Minor concerns detected. Suitable for most skin types with care.',
-                    emoji: '', color: colors.chart2
-                };
-            } else {
-                return {
-                    verdict: score >= 85 ? 'Suitable for daily use' : 'Safe with basic precautions',
-                    detail: `${productName} is well-formulated with ${issueCount === 0 ? 'no' : 'minimal'} concerns for your skin profile.`,
-                    emoji: '✨', color: colors.chart1
-                };
-            }
+                            ? `${topConcern}. Moderate your intake.`
+                            : 'Some nutritional concerns for your profile. Watch portion sizes.',
+                icon: 'scale', color: colors.chart2
+            };
         } else {
-            // Food products — safety level is the anchor, nutri data provides detail
-            if (safetyLevel === SAFETY_LEVELS.CRITICAL || safetyLevel === SAFETY_LEVELS.AVOID) {
+            // SAFE — can use positive language
+            if (nutriGrade === 'A' || score >= 85) {
                 return {
-                    verdict: 'Avoid based on your profile',
-                    detail: topConcern
-                        ? `${topConcern} detected. Not suitable for your dietary requirements.`
-                        : `This product conflicts with your health preferences.${novaGroup >= 4 ? ' Ultra-processed (NOVA 4).' : ''}`,
-                    icon: 'alert', color: colors.chart3
-                };
-            } else if (safetyLevel === SAFETY_LEVELS.CAUTION) {
-                // Caution — never say "Enjoy" or "Good for regular consumption"
-                const highNutrients = [
-                    safety.nutriScore?.breakdown?.negatives?.sodium?.points > 5 ? 'sodium' : '',
-                    safety.nutriScore?.breakdown?.negatives?.sugars?.points > 5 ? 'sugars' : '',
-                    safety.nutriScore?.breakdown?.negatives?.saturates?.points > 5 ? 'saturated fats' : ''
-                ].filter(Boolean);
-                return {
-                    verdict: 'Consume with awareness',
-                    detail: novaGroup >= 4
-                        ? `Ultra-processed (NOVA 4). Best as an occasional treat, not a staple.`
-                        : highNutrients.length > 0
-                            ? `Contains elevated ${highNutrients.join(', ')}. Watch portion sizes.`
-                            : topConcern
-                                ? `${topConcern}. Moderate your intake.`
-                                : 'Some nutritional concerns for your profile. Watch portion sizes.',
-                    icon: 'scale', color: colors.chart2
+                    verdict: 'Excellent nutritional choice',
+                    detail: `${productName} has high nutritional value${novaGroup <= 2 ? ' with minimal processing' : ''}.`,
+                    icon: 'trophy', color: colors.chart1
                 };
             } else {
-                // SAFE — can use positive language
-                if (nutriGrade === 'A' || score >= 85) {
-                    return {
-                        verdict: 'Excellent nutritional choice',
-                        detail: `${productName} has high nutritional value${novaGroup <= 2 ? ' with minimal processing' : ''}.`,
-                        icon: 'trophy', color: colors.chart1
-                    };
-                } else {
-                    return {
-                        verdict: 'Good for regular consumption',
-                        detail: `Balanced nutritional profile.${novaGroup >= 3 ? ' Some processing involved.' : ''}`,
-                        icon: 'thumbsup', color: colors.chart1
-                    };
-                }
+                return {
+                    verdict: 'Good for regular consumption',
+                    detail: `Balanced nutritional profile.${novaGroup >= 3 ? ' Some processing involved.' : ''}`,
+                    icon: 'thumbsup', color: colors.chart1
+                };
             }
         }
     };
@@ -643,7 +580,7 @@ export default function ProductSummary() {
 
     // V5: Nutri-Score Explanation - "Why D?" under the Nutri-Score badge
     const getNutriScoreExplanation = () => {
-        if (isBeautyProduct || !safety.nutriScore) return null;
+        if (!safety.nutriScore) return null;
         const grade = (safety.nutriScore.grade || '').toUpperCase();
         if (!grade) return null;
 
@@ -889,25 +826,25 @@ export default function ProductSummary() {
 
                     {/* Score Badges - Moved to top per client request */}
                     <View style={[styles.badgeRow, { justifyContent: 'center', marginBottom: 16, marginTop: 12 }]}>
-                        {!isBeautyProduct && nutriScoreInfo.grade && (
+                        {!isBeautyProduct && nutriScoreInfo?.grade && (
                             <TouchableOpacity
-                                style={[styles.nutriBadge, { backgroundColor: `${nutriScoreInfo.color}15`, borderColor: nutriScoreInfo.color }]}
+                                style={[styles.nutriBadge, { backgroundColor: `${nutriScoreInfo?.color || colors.mutedForeground}15`, borderColor: nutriScoreInfo?.color || colors.mutedForeground }]}
                                 onPress={() => { hapticMedium(); setShowNutriScoreInfo(true); }}
                                 activeOpacity={0.7}
                             >
-                                <Text style={[styles.nutriGrade, { color: nutriScoreInfo.color }]}>{nutriScoreInfo.grade}</Text>
+                                <Text style={[styles.nutriGrade, { color: nutriScoreInfo?.color || colors.mutedForeground }]}>{nutriScoreInfo?.grade}</Text>
                                 <Text style={styles.nutriLabel}>Nutri-Score</Text>
-                                <Info size={14} color={nutriScoreInfo.color} style={{ marginLeft: 4 }} />
+                                <Info size={14} color={nutriScoreInfo?.color || colors.mutedForeground} style={{ marginLeft: 4 }} />
                             </TouchableOpacity>
                         )}
                         {isBeautyProduct && beautySafety && (
-                            <View style={[styles.nutriBadge, { backgroundColor: `${safetyConfig.color}15`, borderColor: safetyConfig.color }]}>
-                                <Text style={[styles.nutriGrade, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}</Text>
+                            <View style={[styles.nutriBadge, { backgroundColor: `${safetyConfig?.color || colors.chart1}15`, borderColor: safetyConfig?.color || colors.chart1 }]}>
+                                <Text style={[styles.nutriGrade, { color: safetyConfig?.color || colors.chart1 }]}>{Math.round(safety.safeScore || 0)}</Text>
                                 <Text style={styles.nutriLabel}>Safety</Text>
                             </View>
                         )}
-                        <View style={[styles.scoreBadge, { backgroundColor: `${safetyConfig.color}15`, borderColor: safetyConfig.color }]}>
-                            <Text style={[styles.scoreValue, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}</Text>
+                        <View style={[styles.scoreBadge, { backgroundColor: `${safetyConfig?.color || colors.chart1}15`, borderColor: safetyConfig?.color || colors.chart1 }]}>
+                            <Text style={[styles.scoreValue, { color: safetyConfig?.color || colors.chart1 }]}>{Math.round(safety.safeScore || 0)}</Text>
                             <Text style={styles.scoreLabel}>/100</Text>
                         </View>
                     </View>
@@ -921,13 +858,13 @@ export default function ProductSummary() {
 
                     {/* Safety Status */}
                     <Pressable
-                        style={[styles.safetyBox, { backgroundColor: `${safetyConfig.color}10` }]}
+                        style={[styles.safetyBox, { backgroundColor: `${safetyConfig?.color || colors.chart1}10` }]}
                         onPress={() => router.push({ pathname: '/safety-details', params: { productData } })}
                     >
-                        <View style={[styles.safetyIconBg, { backgroundColor: `${safetyConfig.color}20` }]}>
-                            <SafetyIcon size={40} color={safetyConfig.color} />
+                        <View style={[styles.safetyIconBg, { backgroundColor: `${safetyConfig?.color || colors.chart1}20` }]}>
+                            <SafetyIcon size={40} color={safetyConfig?.color || colors.chart1} />
                         </View>
-                        <Text style={[styles.safetyLabel, { color: safetyConfig.color }]}>{safetyConfig.label}</Text>
+                        <Text style={[styles.safetyLabel, { color: safetyConfig?.color || colors.chart1 }]}>{safetyConfig?.label || 'Good'}</Text>
                         <Text style={styles.safetyDescription}>{safetyConfig.description}</Text>
                         <View style={styles.tapHint}>
                             <Text style={styles.tapHintText}>Tap for details</Text>
@@ -936,11 +873,11 @@ export default function ProductSummary() {
                     </Pressable>
 
                     {/* Plain-English Verdict - Phase 3 */}
-                    <View style={[styles.verdictCard, { backgroundColor: `${plainVerdict.color}08`, borderColor: `${plainVerdict.color}25` }]}>
-                        <Text style={styles.verdictEmoji}>{plainVerdict.emoji}</Text>
+                    <View style={[styles.verdictCard, { backgroundColor: `${plainVerdict?.color || colors.chart1}08`, borderColor: `${plainVerdict?.color || colors.chart1}25` }]}>
+                        <Text style={styles.verdictEmoji}>{plainVerdict?.emoji || ''}</Text>
                         <View style={styles.verdictContent}>
-                            <Text style={[styles.verdictTitle, { color: plainVerdict.color }]}>{plainVerdict.verdict}</Text>
-                            <Text style={styles.verdictDetail}>{plainVerdict.detail}</Text>
+                            <Text style={[styles.verdictTitle, { color: plainVerdict?.color || colors.chart1 }]}>{plainVerdict?.verdict || ''}</Text>
+                            <Text style={styles.verdictDetail}>{plainVerdict?.detail || ''}</Text>
                         </View>
                     </View>
 
@@ -1015,15 +952,15 @@ export default function ProductSummary() {
                         {/* NOVA Processing Level */}
                         {novaDisplay && (
                             <Pressable
-                                style={[styles.novaBadge, { backgroundColor: `${novaDisplay.color}15`, borderColor: novaDisplay.color }]}
+                                style={[styles.novaBadge, { backgroundColor: `${novaDisplay?.color || colors.chart1}15`, borderColor: novaDisplay?.color || colors.chart1 }]}
                                 onPress={() => { hapticMedium(); setShowNovaTooltip(true); }}
                             >
-                                {novaDisplay.icon === 'apple' && <Apple size={18} color={novaDisplay.color} />}
-                                {novaDisplay.icon === 'chef' && <ChefHat size={18} color={novaDisplay.color} />}
-                                {novaDisplay.icon === 'package' && <Package size={18} color={novaDisplay.color} />}
-                                {novaDisplay.icon === 'factory' && <Factory size={18} color={novaDisplay.color} />}
+                                {novaDisplay.icon === 'apple' && <Apple size={18} color={novaDisplay?.color || colors.chart1} />}
+                                {novaDisplay.icon === 'chef' && <ChefHat size={18} color={novaDisplay?.color || colors.chart1} />}
+                                {novaDisplay.icon === 'package' && <Package size={18} color={novaDisplay?.color || colors.chart1} />}
+                                {novaDisplay.icon === 'factory' && <Factory size={18} color={novaDisplay?.color || colors.chart1} />}
                                 <View style={styles.novaContent}>
-                                    <Text style={[styles.novaLabel, { color: novaDisplay.color }]}>NOVA {safety.novaGroup?.group || product.novaGroup}</Text>
+                                    <Text style={[styles.novaLabel, { color: novaDisplay?.color || colors.chart1 }]}>NOVA {safety.novaGroup?.group || product.novaGroup}</Text>
                                     <Text style={styles.novaText}>{novaDisplay.label}</Text>
                                 </View>
                                 <Info size={14} color={colors.mutedForeground} style={{ marginLeft: 'auto' }} />
@@ -1032,9 +969,9 @@ export default function ProductSummary() {
 
                         {/* Consumption Guidance */}
                         {consumptionGuidance && (
-                            <View style={[styles.guidanceBadge, { backgroundColor: `${consumptionGuidance.color}10` }]}>
-                                <Clock size={16} color={consumptionGuidance.color} />
-                                <Text style={[styles.guidanceText, { color: consumptionGuidance.color }]}>{consumptionGuidance.text}</Text>
+                            <View style={[styles.guidanceBadge, { backgroundColor: `${consumptionGuidance?.color || colors.chart1}10` }]}>
+                                <Clock size={16} color={consumptionGuidance?.color || colors.chart1} />
+                                <Text style={[styles.guidanceText, { color: consumptionGuidance?.color || colors.chart1 }]}>{consumptionGuidance.text}</Text>
                             </View>
                         )}
 
@@ -1042,12 +979,12 @@ export default function ProductSummary() {
 
                         {/* Fat Quality Breakdown - Phase 3 */}
                         {fatQuality && (
-                            <View style={[styles.fatQualityCard, { backgroundColor: `${fatQuality.color}08`, borderColor: `${fatQuality.color}25` }]}>
+                            <View style={[styles.fatQualityCard, { backgroundColor: `${fatQuality?.color || colors.chart1}08`, borderColor: `${fatQuality?.color || colors.chart1}25` }]}>
                                 <View style={styles.fatQualityHeader}>
                                     <Leaf size={20} color={colors.chart1} />
                                     <View style={styles.fatQualityInfo}>
-                                        <Text style={[styles.fatQualityLabel, { color: fatQuality.color }]}>{fatQuality.label}</Text>
-                                        <Text style={styles.fatQualityTotal}>{showPerServing && servingSize ? `${getPortionValue(fatQuality.totalFat).toFixed(1)}g total fat ${portionLabel}` : `${fatQuality.totalFat}g total fat per 100g`}</Text>
+                                        <Text style={[styles.fatQualityLabel, { color: fatQuality?.color || colors.chart1 }]}>{fatQuality.label}</Text>
+                                        <Text style={styles.fatQualityTotal}>{showPerServing && servingSize ? `${getPortionValue(fatQuality.totalFat).toFixed(1)}g total fat ${portionLabel}` : `${Number(fatQuality.totalFat).toFixed(1)}g total fat per 100g`}</Text>
                                     </View>
                                 </View>
                                 <View style={styles.fatQualityBar}>
@@ -1188,10 +1125,10 @@ export default function ProductSummary() {
                         </View>
                         {/* Main profile */}
                         <View style={styles.familyMemberRow}>
-                            <View style={[styles.familyMemberDot, { backgroundColor: safetyConfig.color }]} />
+                            <View style={[styles.familyMemberDot, { backgroundColor: safetyConfig?.color || colors.chart1 }]} />
                             <Text style={styles.familyMemberName}>{profile?.full_name || 'You'}</Text>
                             <Text style={styles.familyMemberAge}>{profile?.age_group === 'infant' ? 'Infant' : profile?.age_group === 'child' ? 'Child' : 'Adult'}</Text>
-                            <Text style={[styles.familyMemberScore, { color: safetyConfig.color }]}>{Math.round(safety.safeScore || 0)}/100</Text>
+                            <Text style={[styles.familyMemberScore, { color: safetyConfig?.color || colors.chart1 }]}>{Math.round(safety.safeScore || 0)}/100</Text>
                         </View>
                         {/* Family members — recompute safety per member */}
                         {familyMembers.map((member) => {
@@ -1450,7 +1387,7 @@ export default function ProductSummary() {
                         <View style={styles.nutriScoreCard}>
                             <View style={styles.nutriScoreHeader}>
                                 <Text style={styles.nutriScoreTitle}>Safety Analysis</Text>
-                                <View style={[styles.nutriScoreGradeBadge, { backgroundColor: safetyConfig.color }]}>
+                                <View style={[styles.nutriScoreGradeBadge, { backgroundColor: safetyConfig?.color || colors.chart1 }]}>
                                     <Text style={styles.nutriScoreGradeText}>{Math.round(safety.safeScore || 0)}</Text>
                                 </View>
                             </View>
@@ -1567,52 +1504,31 @@ export default function ProductSummary() {
                     </Text>
                 </AnimatedPressable>
 
-                {/* V7: Add to Basket / Replace in Basket Button */}
+                {/* V7: Add to Pantry Button */}
                 <AnimatedPressable
                     style={styles.basketButton}
                     onPress={async () => {
                         hapticMedium();
                         try {
                             if (!user?.id) {
-                                showAlert('Sign In Required', 'Please sign in to use the Smart Basket feature.');
+                                showAlert('Sign In Required', 'Please sign in to use the Pantry feature.');
                                 return;
                             }
-                            const productPayload = {
-                                barcode: product?.code || product?.barcode || '',
-                                name: product?.product_name || product?.name || 'Unknown',
-                                brand: product?.brands || product?.brand || '',
-                                imageUrl: product?.image_url || null,
-                                safetyScore: safety?.adjustedScore ?? safety?.safeScore ?? 0,
-                                safetyLevel: safety?.safety || 'SAFE',
-                            };
-
-                            if (replaceItemId && replaceBasketId) {
-                                // Replace flow: swap old item for this one
-                                await replaceBasketItem(replaceItemId, replaceBasketId, productPayload);
-                                hapticSuccess();
-                                showAlert('Replaced! ✨', 'Product has been swapped in your basket.', [
-                                    { text: 'View Basket', onPress: () => router.push('/basket') },
-                                    { text: 'OK' },
-                                ]);
-                            } else {
-                                // Normal add flow
-                                const basket = await getOrCreateTodayBasket(user.id);
-                                await addProductToBasket(basket.id, productPayload);
-                                hapticSuccess();
-                                showAlert('Added to Basket! 🛒', 'Product added to your Smart Basket.', [
-                                    { text: 'View Basket', onPress: () => router.push('/basket') },
-                                    { text: 'OK' },
-                                ]);
-                            }
+                            await addFromScan(user.id, product);
+                            hapticSuccess();
+                            showAlert('Added to Pantry! 🥫', 'Product added to your pantry.', [
+                                { text: 'View Pantry', onPress: () => router.push('/pantry') },
+                                { text: 'OK' },
+                            ]);
                         } catch (e) {
-                            console.error('[Basket] Add/Replace error:', e?.message || e);
-                            showAlert('Error', e?.message || 'Could not update basket');
+                            console.error('[Pantry] Add error:', e?.message || e);
+                            showAlert('Error', e?.message || 'Could not update pantry');
                         }
                     }}
                 >
-                    <ShoppingCart size={20} color={colors.primary} />
+                    <Refrigerator size={20} color={colors.primary} />
                     <Text style={styles.basketButtonText}>
-                        {replaceItemId ? 'Replace in Basket' : 'Add to Basket'}
+                        Add to Pantry
                     </Text>
                 </AnimatedPressable>
 
@@ -1643,18 +1559,10 @@ export default function ProductSummary() {
                         safetyScore: Math.round(safety.safeScore || 0),
                         safetyLevel: safety.safety || 'SAFE',
                         issues: (safety.issues || []).map(i => typeof i === 'string' ? i : i.label || i.text || String(i)),
-                        isBeautyProduct: !!isBeautyProduct,
                         // Food-specific fields
-                        nutriGrade: isBeautyProduct ? null : (safety.nutriScore?.grade || null),
-                        novaGroup: isBeautyProduct ? null : (product.novaGroup || product.nova_group || null),
-                        nutritionPer100g: isBeautyProduct ? null : (product.nutritionPer100g || null),
-                        // Beauty-specific fields
-                        pillarScores: isBeautyProduct ? {
-                            toxicity: safety.pillarScores?.toxicity ?? null,
-                            sensitization: safety.pillarScores?.sensitization ?? null,
-                            endocrine: safety.pillarScores?.endocrine ?? null,
-                            environment: safety.pillarScores?.environment ?? null,
-                        } : null,
+                        nutriGrade: safety.nutriScore?.grade || null,
+                        novaGroup: product.novaGroup || product.nova_group || null,
+                        nutritionPer100g: product.nutritionPer100g || null,
                     };
                     router.push({
                         pathname: '/ai-chat',
@@ -1720,10 +1628,10 @@ export default function ProductSummary() {
                             </View>
 
                             {/* What this grade means */}
-                            <View style={{ backgroundColor: `${nutriScoreInfo.color}10`, borderRadius: radius.lg, padding: spacing[4], marginBottom: spacing[4], borderLeftWidth: 3, borderLeftColor: nutriScoreInfo.color }}>
+                            <View style={{ backgroundColor: `${nutriScoreInfo?.color || colors.mutedForeground}10`, borderRadius: radius.lg, padding: spacing[4], marginBottom: spacing[4], borderLeftWidth: 3, borderLeftColor: nutriScoreInfo?.color || colors.mutedForeground }}>
                                 <Text style={{ fontSize: 15, fontFamily: fonts.sansBold, color: colors.foreground, marginBottom: 4 }}>
-                                    Grade {nutriScoreInfo.grade} — {
-                                        { A: 'Excellent nutritional quality', B: 'Good nutritional quality', C: 'Average nutritional quality', D: 'Poor nutritional quality', E: 'Very poor nutritional quality' }[nutriScoreInfo.grade] || 'Unknown'
+                                    Grade {nutriScoreInfo?.grade || '?'} — {
+                                        { A: 'Excellent nutritional quality', B: 'Good nutritional quality', C: 'Average nutritional quality', D: 'Poor nutritional quality', E: 'Very poor nutritional quality' }[nutriScoreInfo?.grade || ''] || 'Unknown'
                                     }
                                 </Text>
                                 <Text style={{ fontSize: 13, fontFamily: fonts.sans, color: colors.mutedForeground, lineHeight: 19 }}>

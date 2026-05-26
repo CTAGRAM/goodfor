@@ -101,7 +101,7 @@ export default function Welcome() {
                 maxWidth: "65%",
               }}
             >
-              Food & skincare safety,{"\n"}explained for your family.
+              Healthy grocery & meal assistant,{"\n"}designed for your family.
             </Text>
           </View>
 

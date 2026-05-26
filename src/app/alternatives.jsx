@@ -32,8 +32,7 @@ export default function Alternatives() {
         console.error('Failed to parse product data:', e);
     }
 
-    // Detect if this is a beauty product
-    const isBeautyProduct = product.productType === 'BEAUTY' || product.safetyAnalysis?.productType === 'BEAUTY';
+    // All products are food-only (beauty code removed)
 
     useEffect(() => {
         loadAlternatives();
@@ -42,32 +41,9 @@ export default function Alternatives() {
     const loadAlternatives = async () => {
         try {
             setLoading(true);
-            console.log('[Alternatives] Loading for product:', product.barcode, 'Type:', isBeautyProduct ? 'BEAUTY' : 'FOOD');
+            console.log('[Alternatives] Loading for product:', product.barcode);
 
             let alts = [];
-
-            if (isBeautyProduct) {
-                // Use OpenBeautyFacts for cosmetics
-                console.log('[Alternatives] Using OpenBeautyFacts for beauty product...');
-                const { getBeautyAlternatives } = await import('@/lib/openBeautyFacts');
-                alts = await getBeautyAlternatives(product, 5);
-
-                // Map to display format
-                const mapped = alts.map((alt, index) => ({
-                    barcode: alt.barcode,
-                    name: alt.name,
-                    brand: alt.brand,
-                    imageUrl: alt.imageUrl,
-                    score: alt.safetyScore || 70,
-                    badge: index === 0 ? 'Top Match' :
-                        alt.isOrganic ? 'Organic' :
-                            alt.isVegan ? 'Vegan' :
-                                alt.isCrueltyFree ? 'Cruelty-Free' : 'Alternative',
-                    reasons: getBeautyReasons(alt, product),
-                }));
-                setAlternatives(mapped);
-                return;
-            }
 
             // FOOD PRODUCT: Log product data for debugging
             const productCategories = product.categories || [];

@@ -46,7 +46,7 @@ export default function Paywall() {
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const { showAlert } = useAlert();
-    const { offerings, isLoading, purchasePackage, isPro, loadOfferings } = useRevenueCat();
+    const { offerings, isLoading, purchasePackage, isPro, loadOfferings, restorePurchases } = useRevenueCat();
 
     const [selectedPlan, setSelectedPlan] = useState('annual');
     const [purchasing, setPurchasing] = useState(false);
@@ -54,6 +54,38 @@ export default function Paywall() {
     const [showExitOffer, setShowExitOffer] = useState(false);
     const [exitCountdown, setExitCountdown] = useState(300);
     const [showMorePlans, setShowMorePlans] = useState(false);
+    const [activeTestimonial, setActiveTestimonial] = useState(0);
+    const [showTermsModal, setShowTermsModal] = useState(false);
+    const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+
+    const scrollRef = useRef(null);
+
+    const testimonials = [
+        {
+            name: "Sarah 🇬🇧",
+            initial: "S",
+            sub: "Mum of 3, using since Jan 2026",
+            quote: "\"I usually quit apps after a week, but this one stuck. The mascot, the design, and how quick it is to scan. Obsessed. It's so much easier to shop now!\""
+        },
+        {
+            name: "James 🇺🇸",
+            initial: "J",
+            sub: "Dad of 2, using since Feb 2026",
+            quote: "\"Finally an app that makes checking ingredients simple. The personalized safety scores have completely changed how our family shops for groceries.\""
+        },
+        {
+            name: "Emma 🇦🇺",
+            initial: "E",
+            sub: "Health conscious, using since Mar 2026",
+            quote: "\"The AI assistant Lumi is incredible. It answers all my questions about complex ingredients instantly. Worth every penny for the peace of mind.\""
+        }
+    ];
+
+    const handleTestimonialScroll = (event) => {
+        const slideSize = event.nativeEvent.layoutMeasurement.width;
+        const index = event.nativeEvent.contentOffset.x / slideSize;
+        setActiveTestimonial(Math.round(index));
+    };
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const heroLottieRef = useRef(null);
@@ -68,6 +100,23 @@ export default function Paywall() {
 
     useEffect(() => {
         setTimeout(() => heroLottieRef.current?.play(), 100);
+    }, []);
+
+    // Auto-scroll testimonials
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setActiveTestimonial((prev) => {
+                const nextIndex = (prev + 1) % testimonials.length;
+                if (scrollRef.current) {
+                    scrollRef.current.scrollTo({
+                        x: nextIndex * (SCREEN_WIDTH - 48),
+                        animated: true,
+                    });
+                }
+                return nextIndex;
+            });
+        }, 3000);
+        return () => clearInterval(interval);
     }, []);
 
     // Handle already subscribed users
@@ -133,6 +182,26 @@ export default function Paywall() {
         } finally { setPurchasing(false); }
     };
 
+    const handleRestore = async () => {
+        hapticMedium();
+        setPurchasing(true);
+        try {
+            const customerInfo = await restorePurchases();
+            if (customerInfo?.entitlements?.active?.['GoodFor Pro']) {
+                hapticSuccess();
+                showAlert("Purchases Restored!", "Your Pro access has been restored.", [{ text: "Great", onPress: () => router.replace('/(tabs)') }]);
+            } else {
+                hapticError();
+                showAlert("No Purchases Found", "We couldn't find an active subscription for your account.");
+            }
+        } catch (e) {
+            hapticError();
+            showAlert("Restore Failed", e.message || "Something went wrong.");
+        } finally {
+            setPurchasing(false);
+        }
+    };
+
     const handleBack = async () => {
         if (!showExitOffer && !isPro) {
             setShowExitOffer(true);
@@ -148,7 +217,7 @@ export default function Paywall() {
             <ScrollView style={styles.scrollView} contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 180 }]} showsVerticalScrollIndicator={false} bounces={false}>
                 
                 {/* ─── GREEN HERO & CLOUD ─── */}
-                <View style={[styles.heroBg, { paddingTop: insets.top + 20 }]}>
+                <View style={[styles.heroBg, { height: 320 + insets.top, paddingTop: insets.top }]}>
                     {/* Back Button */}
                     <View style={[styles.closeBtnShadow, { top: insets.top > 0 ? insets.top + 10 : 30 }]}>
                         <TouchableOpacity 
@@ -162,14 +231,16 @@ export default function Paywall() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* Mascot */}
-                    <View style={styles.mascotContainer}>
+                    {/* Panda Lottie — starts below notification bar, scales to fit perfectly */}
+                    <View style={[styles.mascotContainer, { top: insets.top }]}>
                         <LottieView
                             ref={heroLottieRef}
-                            source={require('../assets/animations/upgrade.json')}
+                            source={require('../assets/animations/paywall-bg.json')}
+                            autoPlay
                             loop
                             style={styles.heroLottie}
-                            resizeMode="contain"
+                            resizeMode="cover"
+                            renderMode={Platform.OS === 'android' ? 'SOFTWARE' : 'AUTOMATIC'}
                         />
                     </View>
 
@@ -301,25 +372,40 @@ export default function Paywall() {
                     <View style={styles.successSection}>
                         <Text style={styles.successTitle}>Success stories{'\n'}from our clients</Text>
                         
-                        <View style={styles.testimonialCard}>
-                            <View style={styles.testimonialHeader}>
-                                <View style={styles.testimonialAvatarPlaceholder}>
-                                    <Text style={{color: '#fff', fontFamily: fonts.sansBold}}>S</Text>
+                        <ScrollView 
+                            ref={scrollRef}
+                            horizontal 
+                            pagingEnabled 
+                            showsHorizontalScrollIndicator={false}
+                            onScroll={handleTestimonialScroll}
+                            scrollEventThrottle={16}
+                            snapToAlignment="center"
+                            decelerationRate="fast"
+                        >
+                            {testimonials.map((item, index) => (
+                                <View key={index} style={{ width: SCREEN_WIDTH - 48, paddingHorizontal: 4 }}>
+                                    <View style={styles.testimonialCard}>
+                                        <View style={styles.testimonialHeader}>
+                                            <View style={styles.testimonialAvatarPlaceholder}>
+                                                <Text style={{color: '#fff', fontFamily: fonts.sansBold}}>{item.initial}</Text>
+                                            </View>
+                                            <View style={styles.testimonialInfo}>
+                                                <Text style={styles.testimonialName}>{item.name}</Text>
+                                                <Text style={styles.testimonialSub}>{item.sub}</Text>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.testimonialQuote}>
+                                            {item.quote}
+                                        </Text>
+                                    </View>
                                 </View>
-                                <View style={styles.testimonialInfo}>
-                                    <Text style={styles.testimonialName}>Sarah 🇬🇧</Text>
-                                    <Text style={styles.testimonialSub}>Mum of 3, using since Jan 2026</Text>
-                                </View>
-                            </View>
-                            <Text style={styles.testimonialQuote}>
-                                "I usually quit apps after a week, but this one stuck. The mascot, the design, and how quick it is to scan. Obsessed. It's so much easier to shop now!"
-                            </Text>
-                        </View>
+                            ))}
+                        </ScrollView>
                         
                         <View style={styles.pagingDots}>
-                            <View style={styles.dotActive} />
-                            <View style={styles.dotInactive} />
-                            <View style={styles.dotInactive} />
+                            {testimonials.map((_, index) => (
+                                <View key={index} style={activeTestimonial === index ? styles.dotActive : styles.dotInactive} />
+                            ))}
                         </View>
 
                         <View style={styles.wreathRow}>
@@ -345,9 +431,9 @@ export default function Paywall() {
                         </Text>
                         
                         <View style={styles.footerLinksRow}>
-                            <TouchableOpacity><Text style={styles.footerLink}>Restore purchases</Text></TouchableOpacity>
-                            <TouchableOpacity><Text style={styles.footerLink}>Terms of Use</Text></TouchableOpacity>
-                            <TouchableOpacity><Text style={styles.footerLink}>Privacy Notice</Text></TouchableOpacity>
+                            <TouchableOpacity onPress={handleRestore}><Text style={styles.footerLink}>Restore purchases</Text></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setShowTermsModal(true)}><Text style={styles.footerLink}>Terms of Use</Text></TouchableOpacity>
+                            <TouchableOpacity onPress={() => setShowPrivacyModal(true)}><Text style={styles.footerLink}>Privacy Notice</Text></TouchableOpacity>
                         </View>
                     </View>
 
@@ -405,6 +491,91 @@ export default function Paywall() {
                     </View>
                 </View>
             </Modal>
+
+            {/* TERMS MODAL */}
+            <Modal
+                visible={showTermsModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setShowTermsModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Terms of Use</Text>
+                            <TouchableOpacity style={styles.modalClose} onPress={() => setShowTermsModal(false)}>
+                                <X size={24} color={darkText} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                            <Text style={styles.modalSectionTitle}>1. Definitions and Interpretation</Text>
+                            <Text style={styles.modalText}>
+                                1.1 In these Terms of Service and Conditions (the Terms) for GoodFor.app, the following definitions and rules of interpretation apply unless the context requires otherwise.
+                            </Text>
+                            <Text style={styles.modalText}>
+                                1.2 Defined terms are capitalised throughout these Terms. The following expressions have the meanings set out below:
+                                {"\n"}a) "GoodFor.app" means the mobile application and website operated by The GoodFor Company Ltd, including all features, content, and services provided under the GoodFor brand.
+                                {"\n"}b) "The GoodFor Company" means The GoodFor Company Ltd, company number 16922983, registered at 128 City Road, London, United Kingdom, EC1V 2NX.
+                            </Text>
+                            <Text style={styles.modalSectionTitle}>2. Acceptance of Terms</Text>
+                            <Text style={styles.modalText}>
+                                By downloading, accessing, or using GoodFor.app, you agree to be bound by these Terms. If you do not agree to these Terms, do not use the application.
+                            </Text>
+                            <Text style={styles.modalSectionTitle}>3. Service Description</Text>
+                            <Text style={styles.modalText}>
+                                GoodFor.app provides tools to scan product barcodes, analyze ingredients, and receive personalized safety recommendations based on your dietary preferences and allergens. Our AI (Lumi) provides guidance but is not a substitute for professional medical advice.
+                            </Text>
+                            <View style={{height: 40}} />
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* PRIVACY MODAL */}
+            <Modal
+                visible={showPrivacyModal}
+                animationType="slide"
+                transparent={true}
+                onRequestClose={() => setShowPrivacyModal(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>Privacy Notice</Text>
+                            <TouchableOpacity style={styles.modalClose} onPress={() => setShowPrivacyModal(false)}>
+                                <X size={24} color={darkText} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+                            <Text style={styles.modalSectionTitle}>1. Introduction</Text>
+                            <Text style={styles.modalText}>
+                                Welcome to GoodFor.app. We respect your privacy and are committed to protecting your personal data. This privacy policy will inform you about how we look after your personal data when you visit our application and tell you about your privacy rights and how the law protects you.
+                            </Text>
+                            <Text style={styles.modalSectionTitle}>2. The Data We Collect About You</Text>
+                            <Text style={styles.modalText}>
+                                We may collect, use, store and transfer different kinds of personal data about you which we have grouped together as follows:
+                                {"\n"}• Identity Data: includes first name, last name, username or similar identifier.
+                                {"\n"}• Contact Data: includes email address.
+                                {"\n"}• Health/Dietary Data: includes dietary preferences, allergies, and age-group demographics to provide tailored recommendations.
+                                {"\n"}• Usage Data: includes information about how you use our app, including scanned products and generated analyses.
+                            </Text>
+                            <Text style={styles.modalSectionTitle}>3. How We Use Your Personal Data</Text>
+                            <Text style={styles.modalText}>
+                                We will only use your personal data when the law allows us to. Most commonly, we will use your personal data in the following circumstances:
+                                {"\n"}• Where we need to perform the contract we are about to enter into or have entered into with you (providing the scanning and analysis service).
+                                {"\n"}• Where it is necessary for our legitimate interests (or those of a third party) and your interests and fundamental rights do not override those interests.
+                                {"\n"}• Where we need to comply with a legal obligation.
+                            </Text>
+                            <Text style={styles.modalSectionTitle}>4. Data Security</Text>
+                            <Text style={styles.modalText}>
+                                We have put in place appropriate security measures to prevent your personal data from being accidentally lost, used or accessed in an unauthorised way, altered or disclosed. We use secure databases and encryption to protect your sensitive dietary information.
+                            </Text>
+                            <View style={{height: 40}} />
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
         </View>
     );
 }
@@ -417,7 +588,7 @@ const styles = StyleSheet.create({
     scrollView: { flex: 1 },
     
     // HERO
-    heroBg: { backgroundColor: brandGreen, position: 'relative', height: 260 },
+    heroBg: { backgroundColor: brandGreen, position: 'relative', height: 300, overflow: 'hidden' },
     closeBtnShadow: {
         position: 'absolute', left: 20, zIndex: 20,
         shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2
@@ -430,8 +601,8 @@ const styles = StyleSheet.create({
         flex: 1, alignItems: 'center', justifyContent: 'center', 
         backgroundColor: 'rgba(255,255,255,0.15)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)'
     },
-    mascotContainer: { position: 'absolute', bottom: 10, alignSelf: 'center', zIndex: 10 },
-    heroLottie: { width: 180, height: 180 },
+    mascotContainer: { position: 'absolute', left: 0, right: 0, bottom: 15, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+    heroLottie: { width: '100%', height: '100%' },
     cloudSeparator: { position: 'absolute', bottom: -1, width: '100%', height: 60, zIndex: 5 },
     
     // CONTENT
@@ -510,5 +681,57 @@ const styles = StyleSheet.create({
     continueBtnText: { fontSize: 18, fontFamily: fonts.sansBold, color: '#fff' },
     
     secureRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
-    secureText: { fontSize: 10, fontFamily: fonts.sansMedium, color: grayText }
+    secureText: { fontSize: 10, fontFamily: fonts.sansMedium, color: grayText },
+
+    // BOTTOM SHEET MODAL
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        maxHeight: '80%',
+        paddingBottom: 20,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 24,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F0F2F1',
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontFamily: fonts.headingExtraBold,
+        color: darkText,
+    },
+    modalClose: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#F5F7F6',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modalScroll: {
+        padding: 24,
+    },
+    modalSectionTitle: {
+        fontSize: 16,
+        fontFamily: fonts.headingExtraBold,
+        color: darkText,
+        marginBottom: 8,
+        marginTop: 16,
+    },
+    modalText: {
+        fontSize: 14,
+        fontFamily: fonts.sans,
+        color: grayText,
+        lineHeight: 22,
+        marginBottom: 8,
+    }
 });

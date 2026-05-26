@@ -6,6 +6,8 @@
 const BASE_URL = 'https://world.openfoodfacts.org/api/v2';
 const USER_AGENT = 'GoodFor/1.0 (contact@goodfor.app)';
 
+import { cacheProductOffline, getCachedProductOffline } from './offlineCache';
+
 // V4: Country subdomain mapping for region-filtered results
 const COUNTRY_SUBDOMAINS = {
     'US': 'us', 'GB': 'uk', 'UK': 'uk', 'FR': 'fr', 'DE': 'de', 'ES': 'es',
@@ -39,6 +41,13 @@ async function enforceRateLimit() {
  */
 export async function getProductByBarcode(barcode) {
     try {
+        // First check offline cache
+        const cachedProduct = await getCachedProductOffline(barcode);
+        if (cachedProduct) {
+            console.log(`[OpenFoodFacts] Serving ${barcode} from offline cache`);
+            return { ...cachedProduct, isOffline: true };
+        }
+
         await enforceRateLimit();
 
         const response = await fetch(`${BASE_URL}/product/${barcode}.json`, {
@@ -63,7 +72,12 @@ export async function getProductByBarcode(barcode) {
             return null;
         }
 
-        return parseProduct(data.product);
+        const parsedProduct = parseProduct(data.product);
+        
+        // Save to offline cache asynchronously
+        cacheProductOffline(barcode, parsedProduct);
+        
+        return parsedProduct;
     } catch (error) {
         console.error('OpenFoodFacts API error:', error);
         // Return null on network errors to allow fallback

@@ -57,8 +57,8 @@ export default function SafetyDetails() {
         nutriScore: null,
     };
 
-    // Detect if this is a beauty product
-    const isBeautyProduct = product.productType === 'BEAUTY' || safety.productType === 'BEAUTY';
+    // All products are food-only (beauty code removed)
+    const isBeautyProduct = false;
 
     const nutriments = product.nutriments || {};
     const breakdown = safety.nutriScore?.breakdown || {};
@@ -68,82 +68,8 @@ export default function SafetyDetails() {
     // Get the actual overall score from productSafety.js calculation
     const overallScore = Math.round(safety.safeScore || 50);
 
-    // ============ BEAUTY PRODUCT SCORING (Enhanced v2.0) ============
-    if (isBeautyProduct) {
-        // Use new 5-pillar system from enhanced algorithm
-        const pillars = safety.pillars || {
-            toxicity: 25,
-            sensitization: 25,
-            endocrine: 25,
-            environment: 15,
-            dataQuality: 10,
-        };
-
-        const allIssues = safety.issues || [];
-        const fragranceIssues = allIssues.filter(i => i.type === 'FRAGRANCE_ALLERGEN' || i.type === 'FRAGRANCE');
-        const ageIssues = allIssues.filter(i => i.type === 'AGE_RESTRICTION');
-        const pregnancyIssues = allIssues.filter(i => i.type === 'PREGNANCY_RESTRICTION');
-        const endocrineIssues = allIssues.filter(i => i.type === 'SUNSCREEN_FILTER' || i.name?.includes('OXYBENZONE') || i.name?.includes('PARABEN'));
-        const toxicityIssues = allIssues.filter(i => ['AGE_RESTRICTION', 'PREGNANCY_RESTRICTION', 'INGREDIENT_CONCERN'].includes(i.type));
-        const envIssues = allIssues.filter(i => i.reason?.includes('reef') || i.reason?.includes('environment'));
-
-        // Build scores based on pillar data
-        const scores = [
-            {
-                icon: Leaf,
-                label: 'Toxicity & Irritation',
-                description: toxicityIssues.length > 0
-                    ? `${toxicityIssues.length} concern(s) found`
-                    : 'No toxicity concerns',
-                score: Math.round(pillars.toxicity),
-                max: 25,
-                color: pillars.toxicity >= 20 ? colors.chart1 : pillars.toxicity >= 10 ? colors.chart2 : colors.chart3
-            },
-            {
-                icon: AlertTriangle,
-                label: 'Sensitization Risk',
-                description: (safety.fragranceAllergenCount || 0) > 0
-                    ? `${safety.fragranceAllergenCount} allergen(s) detected`
-                    : 'Low sensitization risk',
-                score: Math.round(pillars.sensitization),
-                max: 25,
-                color: pillars.sensitization >= 20 ? colors.chart1 : pillars.sensitization >= 10 ? colors.chart2 : colors.chart3
-            },
-
-            {
-                icon: ShieldAlert,
-                label: 'Endocrine Safety',
-                description: endocrineIssues.length > 0
-                    ? `${endocrineIssues.length} endocrine concern(s)`
-                    : 'No hormone disruption risk',
-                score: Math.round(pillars.endocrine),
-                max: 25,
-                color: pillars.endocrine >= 20 ? colors.chart1 : pillars.endocrine >= 10 ? colors.chart2 : colors.chart3
-            },
-            {
-                icon: Heart,
-                label: 'Environmental Impact',
-                description: envIssues.length > 0
-                    ? `${envIssues.length} environmental concern(s)`
-                    : 'Eco-friendly formulation',
-                score: Math.round(pillars.environment),
-                max: 15,
-                color: pillars.environment >= 12 ? colors.chart1 : pillars.environment >= 5 ? colors.chart2 : colors.chart3
-            },
-            {
-                icon: FileText,
-                label: 'Data Quality',
-                description: pillars.dataQuality >= 8 ? 'Complete INCI list' : 'Limited ingredient data',
-                score: Math.round(pillars.dataQuality),
-                max: 10,
-                color: pillars.dataQuality >= 8 ? colors.chart1 : colors.chart2,
-                tooltip: 'This score reflects the availability of ingredient data and clinical studies — not evidence of harm. Most cosmetic products fall in this range.',
-            },
-        ];
-
-        var finalScores = scores;
-    } else {
-        // ============ FOOD PRODUCT SCORING ============
+    // ============ FOOD PRODUCT SCORING ============
+    {
         // Calculate RAW category scores (these represent relative importance/impact)
 
         // 1. Ingredients Safety: Based on ingredient-related issues
@@ -434,32 +360,7 @@ export default function SafetyDetails() {
                             <Text style={styles.cautionTitle}> Who should be cautious</Text>
                         </View>
                         <View style={styles.cautionList}>
-                            {isBeautyProduct ? (
-                                <>
-                                    {(safety.fragranceAllergenCount > 0) && (
-                                        <View style={styles.cautionItem}>
-                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart2}20` }]}>
-                                                <Flower2 size={14} color={colors.chart2} />
-                                            </View>
-                                            <Text style={styles.cautionText}>People with fragrance allergies</Text>
-                                        </View>
-                                    )}
-                                    {(safety.issues?.some(i => i.type === 'SENSITIZATION' || i.reason?.includes('sensitive'))) && (
-                                        <View style={styles.cautionItem}>
-                                            <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart2}20` }]}>
-                                                <Droplets size={14} color={colors.chart2} />
-                                            </View>
-                                            <Text style={styles.cautionText}>Very sensitive or eczema-prone skin</Text>
-                                        </View>
-                                    )}
-                                    <View style={styles.cautionItem}>
-                                        <View style={[styles.cautionBadge, { backgroundColor: `${colors.chart3}20` }]}>
-                                            <Baby size={14} color={colors.chart3} />
-                                        </View>
-                                        <Text style={styles.cautionText}>Infants and toddlers (under 3 years)</Text>
-                                    </View>
-                                </>
-                            ) : (
+                            {(() => (
                                 <>
                                     {(nutriments.sodium_100g > 400) && (
                                         <View style={styles.cautionItem}>
@@ -486,7 +387,7 @@ export default function SafetyDetails() {
                                         </View>
                                     )}
                                 </>
-                            )}
+                            ))()}
                         </View>
                     </View>
                 </View>

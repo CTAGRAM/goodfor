@@ -10,7 +10,8 @@ import {
   Zap,
   Camera,
   AlertCircle,
-  ScanLine
+  ScanLine,
+  QrCode
 } from "lucide-react-native";
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, Easing } from "react-native-reanimated";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
@@ -200,6 +201,25 @@ export default function Scan() {
 
           {/* Footer - positioned above tab bar */}
           <View style={[styles.footer, { paddingBottom: insets.bottom + 100 }]}>
+            {/* Mode Toggle */}
+            <View style={styles.modeToggleContainer}>
+              <View style={styles.modeToggleActive}>
+                <QrCode size={16} color={colors.primaryForeground} />
+                <Text style={styles.modeToggleActiveText}>Barcode</Text>
+              </View>
+              <Pressable
+                onPress={() => {
+                  setScanned(true);
+                  router.push('/fridge-scanner');
+                  setTimeout(() => setScanned(false), 1000);
+                }}
+                style={styles.modeToggleInactive}
+              >
+                <Camera size={16} color="rgba(255,255,255,0.8)" />
+                <Text style={styles.modeToggleInactiveText}>Fridge Photo</Text>
+              </Pressable>
+            </View>
+
             {/* Scan Label Button — bypass barcode */}
             <AnimatedPressable
               style={styles.scanLabelButton}
@@ -427,5 +447,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: fonts.sans.bold,
     color: colors.primaryForeground,
+  },
+  modeToggleContainer: {
+    flexDirection: 'row',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderRadius: 9999,
+    padding: 4,
+    gap: 4,
+    marginBottom: 10,
+  },
+  modeToggleActive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: colors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 9999,
+  },
+  modeToggleActiveText: {
+    fontSize: 13,
+    fontFamily: 'Rubik_600SemiBold',
+    color: colors.primaryForeground,
+  },
+  modeToggleInactive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 9999,
+  },
+  modeToggleInactiveText: {
+    fontSize: 13,
+    fontFamily: 'Rubik_500Medium',
+    color: 'rgba(255,255,255,0.8)',
   },
 });

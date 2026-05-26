@@ -37,11 +37,12 @@ import {
 } from "lucide-react-native";
 import { colors, fonts, radius } from "@/constants/theme";
 import { sendMessage } from "@/lib/openai";
-import { analyzeImageForChat } from "@/lib/geminiVision";
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabaseAuth";
 import MarkdownText from "@/components/MarkdownText";
+import GenUIRenderer from "@/components/GenUIRenderer";
 import { useAlert } from "@/contexts/AlertContext";
 import { TypingDots } from '@/components/AnimatedEffects';
 
@@ -86,27 +87,18 @@ export default function AIChat() {
     // Update prompts based on product context
     useEffect(() => {
         if (productInfo) {
-            if (productInfo.isBeautyProduct) {
-                setQuickPrompts([
-                    "Are these ingredients safe for my skin?",
-                    "Does this product have any health risks?",
-                    "What are healthier alternatives to this product?",
-                    "Explain the ingredients in this product simply",
-                ]);
-            } else {
-                setQuickPrompts([
-                    "Is this product safe for kids?",
-                    "Does this product have any health risks?",
-                    "What are healthier alternatives to this product?",
-                    "Does this product contain allergens?",
-                ]);
-            }
-        } else {
             setQuickPrompts([
                 "Is this product safe for kids?",
                 "Does this product have any health risks?",
                 "What are healthier alternatives to this product?",
-                "Explain the ingredients in this product simply",
+                "Does this product contain allergens?",
+            ]);
+        } else {
+            setQuickPrompts([
+                "Is this product safe for kids?",
+                "What are healthier alternatives to this product?",
+                "Suggest a healthy recipe with my scanned products",
+                "Help me plan a healthy meal for this week",
             ]);
         }
     }, [productInfo]);
@@ -306,33 +298,34 @@ export default function AIChat() {
     const autoSendProductAnalysis = async (ctx) => {
         let autoPrompt;
 
-        if (ctx.isBeautyProduct) {
-            // Beauty-specific prompt — no food, Nutri-Score, or NOVA references
-            const issuesList = ctx.issues?.length > 0 ? `\nConcerns flagged: ${ctx.issues.join(', ')}` : '';
-            const pillarInfo = ctx.pillarScores ? `\nPillar Scores — Toxicity: ${ctx.pillarScores.toxicity ?? 'N/A'}/25, Sensitization: ${ctx.pillarScores.sensitization ?? 'N/A'}/25, Endocrine: ${ctx.pillarScores.endocrine ?? 'N/A'}/25, Environment: ${ctx.pillarScores.environment ?? 'N/A'}/15` : '';
+        // Safely serialize arrays that might contain objects
+        const serializeArray = (arr) => {
+            if (!Array.isArray(arr) || arr.length === 0) return '';
+            return arr.map(item => {
+                if (typeof item === 'string') return item;
+                if (typeof item === 'object' && item !== null) {
+                    return item.name || item.title || item.description || JSON.stringify(item);
+                }
+                return String(item);
+            }).join(', ');
+        };
 
-            autoPrompt = `Analyse this beauty product I just scanned:\n\n` +
-                `**${ctx.name}**${ctx.brand ? ` by ${ctx.brand}` : ''}\n` +
-                `Overall Safety Score: ${ctx.safetyScore}/100 (${ctx.safetyLevel})` +
-                pillarInfo +
-                issuesList +
-                (ctx.ingredientsText ? `\n\nFull INCI list: ${ctx.ingredientsText.substring(0, 500)}` : '') +
-                `\n\nGive me a clear breakdown of this product's safety profile based on my age group. Categorise the key ingredients by function (preservative, surfactant, active, UV filter, fragrance, etc.), flag any sensitisation or endocrine risks, and suggest gentler alternatives for any problematic ingredients.`;
-        } else {
-            // Food-specific prompt (original)
-            const issuesList = ctx.issues?.length > 0 ? `\nConcerns: ${ctx.issues.join(', ')}` : '';
-            const allergensList = ctx.allergens?.length > 0 ? `\nAllergens: ${ctx.allergens.join(', ')}` : '';
-            const additivesList = ctx.additives?.length > 0 ? `\nAdditives: ${ctx.additives.join(', ')}` : '';
+        // Food-specific prompt
+        const issuesStr = serializeArray(ctx.issues);
+        const allergensStr = serializeArray(ctx.allergens);
+        const additivesStr = serializeArray(ctx.additives);
+        const issuesList = issuesStr ? `\nConcerns: ${issuesStr}` : '';
+        const allergensList = allergensStr ? `\nAllergens: ${allergensStr}` : '';
+        const additivesList = additivesStr ? `\nAdditives: ${additivesStr}` : '';
 
-            autoPrompt = `Analyze this product I just scanned:\n\n` +
-                `**${ctx.name}**${ctx.brand ? ` by ${ctx.brand}` : ''}\n` +
-                `Safety Score: ${ctx.safetyScore}/100 (${ctx.safetyLevel})` +
-                (ctx.nutriGrade ? ` | Nutri-Score: ${ctx.nutriGrade.toUpperCase()}` : '') +
-                (ctx.novaGroup ? ` | NOVA: ${ctx.novaGroup}` : '') +
-                issuesList + allergensList + additivesList +
-                (ctx.ingredientsText ? `\n\nIngredients: ${ctx.ingredientsText.substring(0, 500)}` : '') +
-                `\n\nGive me a clear breakdown of whether this product is good for me based on my profile. Highlight any concerns and suggest what to watch out for.`;
-        }
+        autoPrompt = `Analyze this product I just scanned:\n\n` +
+            `**${ctx.name}**${ctx.brand ? ` by ${ctx.brand}` : ''}\n` +
+            `Safety Score: ${ctx.safetyScore}/100 (${ctx.safetyLevel})` +
+            (ctx.nutriGrade ? ` | Nutri-Score: ${ctx.nutriGrade.toUpperCase()}` : '') +
+            (ctx.novaGroup ? ` | NOVA: ${ctx.novaGroup}` : '') +
+            issuesList + allergensList + additivesList +
+            (ctx.ingredientsText ? `\n\nIngredients: ${ctx.ingredientsText.substring(0, 500)}` : '') +
+            `\n\nGive me a clear breakdown of whether this product is good for me based on my profile. Highlight any concerns and suggest what to watch out for.`;
 
         const userMessage = { role: "user", content: autoPrompt };
         const newMessages = [userMessage];
@@ -341,7 +334,7 @@ export default function AIChat() {
         setIsLoading(true);
 
         try {
-            const response = await sendMessage(newMessages, selectedAge, userContext, !!ctx.isBeautyProduct);
+            const response = await sendMessage(newMessages, selectedAge, userContext);
             const assistantMessage = { role: "assistant", content: response };
             const finalMessages = [...newMessages, assistantMessage];
 
@@ -458,12 +451,16 @@ export default function AIChat() {
         if (!limitCheck) return; // Limit reached
 
         const userMsgContent = textToSend.trim();
+        const currentImage = pendingImage;
         const userMessage = { role: "user", content: userMsgContent };
+        // Attach image URI for rendering in chat bubble (not base64, just the local URI)
+        if (currentImage) {
+            userMessage.imageUri = currentImage.uri;
+        }
         const newMessages = [...messages, userMessage];
 
         setMessages(newMessages);
         setMessage("");
-        const currentImage = pendingImage;
         setPendingImage(null);
         setIsLoading(true);
 
@@ -475,18 +472,9 @@ export default function AIChat() {
         // For now, we just update DB.
 
         try {
-            let response;
-            if (currentImage) {
-                // Use Gemini Vision for image analysis
-                response = await analyzeImageForChat(
-                    currentImage.base64,
-                    currentImage.mimeType || 'image/jpeg',
-                    userMsgContent || 'What can you tell me about this product?',
-                    userContext
-                );
-            } else {
-                response = await sendMessage(newMessages, selectedAge, userContext, !!productInfo?.isBeautyProduct);
-            }
+            // Unified path: sendMessage handles both text and image via edge function
+            const imageData = currentImage ? { base64: currentImage.base64, mimeType: currentImage.mimeType || 'image/jpeg' } : null;
+            const response = await sendMessage(newMessages, selectedAge, userContext, false, imageData);
             const assistantMessage = { role: "assistant", content: response };
             const finalMessages = [...newMessages, assistantMessage];
 
@@ -692,16 +680,39 @@ export default function AIChat() {
                                 ]}
                             >
                                 {msg.role === "user" ? (
-                                    <Text style={[styles.messageText, styles.userMessageText]}>
-                                        {msg.content}
-                                    </Text>
+                                    <View>
+                                        {msg.imageUri && (
+                                            <Image
+                                                source={{ uri: msg.imageUri }}
+                                                style={{ width: 180, height: 180, borderRadius: 12, marginBottom: 8 }}
+                                                resizeMode="cover"
+                                            />
+                                        )}
+                                        {msg.content ? (
+                                            <Text style={[styles.messageText, styles.userMessageText]}>
+                                                {msg.content}
+                                            </Text>
+                                        ) : null}
+                                    </View>
                                 ) : (
-                                    <MarkdownText
+                                    <GenUIRenderer
+                                        content={msg.content}
                                         style={styles.markdownContainer}
-                                        isUser={false}
-                                    >
-                                        {msg.content}
-                                    </MarkdownText>
+                                        productContext={productInfo}
+                                        isFirstAssistant={index === messages.findIndex(m => m.role === 'assistant')}
+                                        onAction={(action) => {
+                                            if (action?.startsWith('search:')) {
+                                                const query = action.replace('search:', '');
+                                                setMessage(`Tell me more about ${query}`);
+                                            } else if (action === 'find_alternatives') {
+                                                setMessage('What are healthier alternatives?');
+                                            } else if (action === 'more_details') {
+                                                setMessage('Give me more details about the ingredients');
+                                            } else if (action === 'save_product') {
+                                                showAlert('Saved', 'Product bookmarked!');
+                                            }
+                                        }}
+                                    />
                                 )}
                             </View>
                         </View>
@@ -758,9 +769,25 @@ export default function AIChat() {
                     </View>
 
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={styles.ageSelector}>
-                            <User size={16} color={colors.primary} />
-                        </View>
+                        <TouchableOpacity
+                            style={styles.ageSelector}
+                            onPress={() => {
+                                const ages = ['adult', 'child', 'toddler'];
+                                const currentIndex = ages.indexOf(selectedAge);
+                                const nextIndex = (currentIndex + 1) % ages.length;
+                                setSelectedAge(ages[nextIndex]);
+                                const labels = { adult: 'Adult', child: 'Child', toddler: 'Toddler' };
+                                showAlert('Age Profile', `Switched to ${labels[ages[nextIndex]]} mode`);
+                            }}
+                        >
+                            {selectedAge === 'toddler' ? (
+                                <Baby size={16} color={colors.primary} />
+                            ) : selectedAge === 'child' ? (
+                                <UserCircle size={16} color={colors.primary} />
+                            ) : (
+                                <User size={16} color={colors.primary} />
+                            )}
+                        </TouchableOpacity>
 
                         {/* V6: Image picker for photo analysis */}
                         <TouchableOpacity
@@ -774,10 +801,18 @@ export default function AIChat() {
                                     });
                                     if (!result.canceled && result.assets?.[0]?.base64) {
                                         const asset = result.assets[0];
+                                        
+                                        // Force convert to JPEG to strip HEIC and get valid base64
+                                        const manipulatedImage = await ImageManipulator.manipulateAsync(
+                                            asset.uri,
+                                            [], // no resizing
+                                            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                                        );
+
                                         setPendingImage({
-                                            uri: asset.uri,
-                                            base64: asset.base64,
-                                            mimeType: asset.mimeType || 'image/jpeg',
+                                            uri: manipulatedImage.uri,
+                                            base64: manipulatedImage.base64,
+                                            mimeType: 'image/jpeg',
                                         });
                                     }
                                 } catch (e) {

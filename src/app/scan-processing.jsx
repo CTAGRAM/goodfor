@@ -7,7 +7,6 @@ import { Leaf, ShieldCheck, Sparkles } from "lucide-react-native";
 import { colors, fonts, spacing, radius } from "@/constants/theme";
 import { getProductByBarcode, PRODUCT_TYPES } from "@/lib/productRouter";
 import { analyzeProductSafety, yearsToMonths } from "@/lib/productSafety";
-import { analyzeCosmeticSafety } from "@/lib/cosmeticSafety";
 import { hapticSuccess, hapticError } from "@/lib/haptics";
 import { useAuth } from "@/contexts/AuthContext";
 import { useRevenueCat } from "@/contexts/RevenueCatContext";
@@ -169,25 +168,7 @@ export default function ScanProcessing() {
             });
 
             // Route to appropriate safety analysis based on product type
-            let safetyAnalysis;
-            console.log('[ScanProcessing] Product type check:', product.productType, '===', PRODUCT_TYPES.BEAUTY, '?', product.productType === PRODUCT_TYPES.BEAUTY);
-
-            if (product.productType === PRODUCT_TYPES.BEAUTY) {
-                console.log('[ScanProcessing] ✓ Routing to COSMETIC analysis');
-                setStatus('Analysing cosmetic safety...');
-                safetyAnalysis = analyzeCosmeticSafety(product, userPreferences);
-                console.log('[ScanProcessing] Cosmetic analysis result:', {
-                    safety: safetyAnalysis.safety,
-                    score: safetyAnalysis.safeScore,
-                    issuesCount: safetyAnalysis.issues?.length,
-                    hasPillars: !!safetyAnalysis.pillars,
-                    hasPersonalConcerns: safetyAnalysis.personalConcerns?.length > 0
-                });
-            } else {
-                console.log('[ScanProcessing] → Routing to FOOD analysis');
-                // Default to food analysis
-                safetyAnalysis = analyzeProductSafety(product, ageMonths, userPreferences);
-            }
+            const safetyAnalysis = analyzeProductSafety(product, ageMonths, userPreferences);
 
             setStatus('Saving results...');
             await saveScanToHistory(product, safetyAnalysis);
@@ -242,7 +223,9 @@ export default function ScanProcessing() {
                         sugars: product.nutriments?.sugars || 0,
                         sodium: product.nutriments?.sodium || 0,
                         salt: product.nutriments?.salt || 0,
-                        saturated_fat: product.nutriments?.saturated_fat || 0,
+                        fat: product.nutriments?.fat || 0,
+                        saturated_fat: product.nutriments?.saturated_fat || product.nutriments?.['saturated-fat'] || 0,
+                        trans_fat: product.nutriments?.trans_fat || product.nutriments?.['trans-fat'] || 0,
                         proteins: product.nutriments?.proteins || 0,
                         fiber: product.nutriments?.fiber || 0,
                         caffeine: product.nutriments?.caffeine || 0,

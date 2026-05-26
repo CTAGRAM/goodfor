@@ -1,189 +1,295 @@
-import { View, Text, Image, Animated } from "react-native";
+import { View, Text, Animated, Pressable, Dimensions, StyleSheet } from "react-native";
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useEffect, useRef, useState } from "react";
-import { Leaf } from "lucide-react-native";
+import { Video, ResizeMode } from "expo-av";
+import { ArrowLeft, ArrowRight } from "lucide-react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
+
+import { colors, fonts } from "@/constants/theme";
+
+const { width: SCREEN_WIDTH } = Dimensions.get("window");
 
 const STEPS = [
-    "Analysing your preferences…",
-    "Setting up your profile…",
-    "Tailoring ingredient insights…",
-    "Calibrating safety scores…",
-    "Almost ready…",
+  "Analysing your preferences…",
+  "Setting up your profile…",
+  "Tailoring ingredient insights…",
+  "Calibrating safety scores…",
+  "Your experience is ready ✓",
 ];
 
+const VIDEO_SOURCE = require("../../../assets/video/demo_720p.mp4");
+
 export default function Personalizing() {
-    const router = useRouter();
-    const insets = useSafeAreaInsets();
-    const [stepIndex, setStepIndex] = useState(0);
-    const progressAnim = useRef(new Animated.Value(0)).current;
-    const fadeAnim = useRef(new Animated.Value(0)).current;
-    const scaleAnim = useRef(new Animated.Value(0.8)).current;
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [stepIndex, setStepIndex] = useState(0);
+  const [showButton, setShowButton] = useState(false);
 
-    useEffect(() => {
-        // Fade in
-        Animated.parallel([
-            Animated.timing(fadeAnim, {
-                toValue: 1, duration: 500, useNativeDriver: true,
-            }),
-            Animated.spring(scaleAnim, {
-                toValue: 1, tension: 50, friction: 7, useNativeDriver: true,
-            }),
-        ]).start();
+  // Animations
+  const progressAnim = useRef(new Animated.Value(0)).current;
+  const panelFade = useRef(new Animated.Value(0)).current;
+  const panelSlide = useRef(new Animated.Value(40)).current;
+  const buttonFade = useRef(new Animated.Value(0)).current;
+  const buttonSlide = useRef(new Animated.Value(24)).current;
+  const dotPulse = useRef(new Animated.Value(1)).current;
 
-        // Animate progress bar over 4 seconds
-        Animated.timing(progressAnim, {
-            toValue: 1, duration: 4000, useNativeDriver: false,
-        }).start();
+  useEffect(() => {
+    // Panel entrance
+    Animated.parallel([
+      Animated.timing(panelFade, {
+        toValue: 1, duration: 600, useNativeDriver: true,
+      }),
+      Animated.spring(panelSlide, {
+        toValue: 0, tension: 40, friction: 8, useNativeDriver: true,
+      }),
+    ]).start();
 
-        // Cycle through steps
-        const interval = setInterval(() => {
-            setStepIndex((prev) => {
-                if (prev < STEPS.length - 1) return prev + 1;
-                return prev;
-            });
-        }, 800);
+    // Fill progress over 4s
+    Animated.timing(progressAnim, {
+      toValue: 1, duration: 4000, useNativeDriver: false,
+    }).start();
 
-        // Navigate after animation completes
-        const timeout = setTimeout(() => {
-            router.replace("/onboarding/complete");
-        }, 4500);
-
-        return () => {
-            clearInterval(interval);
-            clearTimeout(timeout);
-        };
-    }, []);
-
-    const progressWidth = progressAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: ["0%", "100%"],
-    });
-
-    return (
-        <View style={{ flex: 1, backgroundColor: "#f2f5f3" }}>
-            <StatusBar style="dark" />
-
-            {/* Decorative Blurs */}
-            <View
-                style={{
-                    position: "absolute", top: -140, right: -80,
-                    width: 320, height: 320,
-                    backgroundColor: "rgba(214, 228, 218, 0.2)",
-                    borderRadius: 160,
-                }}
-            />
-            <View
-                style={{
-                    position: "absolute", bottom: -100, left: -100,
-                    width: 300, height: 300,
-                    backgroundColor: "rgba(52, 168, 83, 0.06)",
-                    borderRadius: 150,
-                }}
-            />
-            <View
-                style={{
-                    position: "absolute", top: "45%", left: "55%",
-                    width: 200, height: 200,
-                    backgroundColor: "rgba(214, 228, 218, 0.15)",
-                    borderRadius: 100,
-                    marginLeft: -100, marginTop: -100,
-                }}
-            />
-
-            {/* Content */}
-            <Animated.View
-                style={{
-                    flex: 1, alignItems: "center", justifyContent: "center",
-                    paddingHorizontal: 40,
-                    opacity: fadeAnim,
-                    transform: [{ scale: scaleAnim }],
-                }}
-            >
-                {/* Panda Illustration */}
-                <Image
-                    source={require("../../../assets/images/panda-peek.png")}
-                    style={{ width: 180, height: 100, marginBottom: 48 }}
-                    resizeMode="contain"
-                />
-
-                {/* Animated Leaf */}
-                <View
-                    style={{
-                        width: 80, height: 80, borderRadius: 40,
-                        backgroundColor: "rgba(52, 168, 83, 0.08)",
-                        alignItems: "center", justifyContent: "center",
-                        marginBottom: 32,
-                    }}
-                >
-                    <View
-                        style={{
-                            width: 56, height: 56, borderRadius: 28,
-                            backgroundColor: "rgba(52, 168, 83, 0.12)",
-                            alignItems: "center", justifyContent: "center",
-                        }}
-                    >
-                        <Leaf size={28} color="#34a853" />
-                    </View>
-                </View>
-
-                {/* Title */}
-                <Text
-                    style={{
-                        fontSize: 24, fontFamily: "Rubik_800ExtraBold",
-                        color: "#1a1d1c", textAlign: "center",
-                        marginBottom: 12,
-                    }}
-                >
-                    Personalising your{"\n"}experience
-                </Text>
-
-                {/* Rotating Status Text */}
-                <Text
-                    style={{
-                        fontSize: 14, fontFamily: "Rubik_400Regular",
-                        color: "#6c7570", textAlign: "center",
-                        marginBottom: 40, height: 20,
-                    }}
-                >
-                    {STEPS[stepIndex]}
-                </Text>
-
-                {/* Progress Bar */}
-                <View
-                    style={{
-                        width: "100%", height: 6,
-                        backgroundColor: "#e1e6e3", borderRadius: 3,
-                        overflow: "hidden",
-                    }}
-                >
-                    <Animated.View
-                        style={{
-                            height: 6, borderRadius: 3,
-                            backgroundColor: "#34a853",
-                            width: progressWidth,
-                        }}
-                    />
-                </View>
-
-                {/* Badge */}
-                <View
-                    style={{
-                        marginTop: 24,
-                        flexDirection: "row", alignItems: "center",
-                        paddingHorizontal: 14, paddingVertical: 8,
-                        backgroundColor: "#ffffff", borderRadius: 999,
-                        borderWidth: 1, borderColor: "rgba(225, 230, 227, 0.4)",
-                        gap: 6,
-                    }}
-                >
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: "#34a853" }} />
-                    <Text style={{ fontSize: 11, fontFamily: "Rubik_500Medium", color: "#1a1d1c" }}>
-                        Collecting your answers
-                    </Text>
-                </View>
-            </Animated.View>
-        </View>
+    // Pulsing dot while loading
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dotPulse, {
+          toValue: 0.3, duration: 600, useNativeDriver: true,
+        }),
+        Animated.timing(dotPulse, {
+          toValue: 1, duration: 600, useNativeDriver: true,
+        }),
+      ])
     );
+    pulse.start();
+
+    // Step text rotation
+    const interval = setInterval(() => {
+      setStepIndex((prev) => (prev < STEPS.length - 1 ? prev + 1 : prev));
+    }, 800);
+
+    // Show button after progress fills
+    const buttonTimer = setTimeout(() => {
+      pulse.stop();
+      dotPulse.setValue(1);
+      setShowButton(true);
+      Animated.parallel([
+        Animated.timing(buttonFade, {
+          toValue: 1, duration: 500, useNativeDriver: true,
+        }),
+        Animated.spring(buttonSlide, {
+          toValue: 0, tension: 50, friction: 8, useNativeDriver: true,
+        }),
+      ]).start();
+    }, 4400);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(buttonTimer);
+      pulse.stop();
+    };
+  }, []);
+
+  const progressWidth = progressAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ["0%", "100%"],
+  });
+
+  return (
+    <View style={styles.container}>
+      <StatusBar style="light" />
+
+      {/* ── Full-screen video ── */}
+      <Video
+        source={VIDEO_SOURCE}
+        shouldPlay
+        isLooping
+        isMuted
+        resizeMode={ResizeMode.COVER}
+        style={StyleSheet.absoluteFill}
+      />
+
+      {/* ── Top gradient (subtle, for status bar readability) ── */}
+      <LinearGradient
+        colors={["rgba(0,0,0,0.4)", "transparent"]}
+        style={styles.topGradient}
+      />
+
+      {/* ── Back button ── */}
+      <Pressable
+        onPress={() => router.back()}
+        style={[styles.backButton, { top: insets.top + 8 }]}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      >
+        <ArrowLeft size={22} color="#fff" />
+      </Pressable>
+
+      {/* ── Bottom gradient ── */}
+      <LinearGradient
+        colors={[
+          "transparent",
+          "rgba(24,36,28,0.5)",
+          "rgba(24,36,28,0.85)",
+          "rgba(24,36,28,0.95)",
+        ]}
+        locations={[0, 0.3, 0.65, 1]}
+        style={[styles.bottomGradient, { paddingBottom: insets.bottom + 20 }]}
+      >
+        <Animated.View
+          style={[
+            styles.bottomContent,
+            {
+              opacity: panelFade,
+              transform: [{ translateY: panelSlide }],
+            },
+          ]}
+        >
+          {/* Status indicator */}
+          <View style={styles.statusRow}>
+            <Animated.View
+              style={[
+                styles.statusDot,
+                {
+                  opacity: dotPulse,
+                  backgroundColor: showButton ? "#34A853" : "#FFF",
+                },
+              ]}
+            />
+            <Text style={styles.statusText}>
+              {STEPS[stepIndex]}
+            </Text>
+          </View>
+
+          {/* Progress track */}
+          <View style={styles.progressTrack}>
+            <Animated.View
+              style={[
+                styles.progressFill,
+                { width: progressWidth },
+              ]}
+            />
+          </View>
+
+          {/* ── Button area ── */}
+          {showButton && (
+            <Animated.View
+              style={{
+                opacity: buttonFade,
+                transform: [{ translateY: buttonSlide }],
+              }}
+            >
+              <Pressable
+                onPress={() => router.replace("/onboarding/complete")}
+                style={({ pressed }) => [
+                  styles.ctaButton,
+                  pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+                ]}
+              >
+                <Text style={styles.ctaText}>Continue</Text>
+                <View style={styles.ctaArrowCircle}>
+                  <ArrowRight size={16} color={colors.primary} strokeWidth={2.5} />
+                </View>
+              </Pressable>
+            </Animated.View>
+          )}
+        </Animated.View>
+      </LinearGradient>
+    </View>
+  );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#0a1a10",
+  },
+  topGradient: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+    zIndex: 2,
+  },
+  backButton: {
+    position: "absolute",
+    left: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+  },
+  bottomGradient: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 80,
+    justifyContent: "flex-end",
+  },
+  bottomContent: {
+    paddingHorizontal: 24,
+  },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 14,
+    fontFamily: "Rubik_500Medium",
+    color: "rgba(255,255,255,0.75)",
+    letterSpacing: 0.1,
+  },
+  progressTrack: {
+    width: "100%",
+    height: 3,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: "#34A853",
+  },
+  ctaButton: {
+    marginTop: 24,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "#FFF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  ctaText: {
+    fontSize: 17,
+    fontFamily: "Rubik_700Bold",
+    color: "#243628",
+  },
+  ctaArrowCircle: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "rgba(36,54,40,0.08)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

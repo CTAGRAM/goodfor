@@ -8,36 +8,33 @@ const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
-const SYSTEM_PROMPT_FOOD = `You are Lumi, GoodFor's friendly and knowledgeable AI health assistant. You help users understand food products, ingredients, nutrition labels, and make healthier choices.
+const FORMATTING_RULES = `
+## Response Formatting Rules (CRITICAL — follow exactly):
+- Use ## headers to organize your response into clear sections (e.g. ## Key Concerns, ## Verdict)
+- You MUST include a "## Nutrition Analysis" section for food products. List nutrients like this exactly: "- **Sugar:** 12g (High)" or "- **Fiber:** 2g (Good)". Use parentheses for status (High/Moderate/Good).
+- When listing ingredients or items to watch, use numbered lists with bold names: "1. **Sugar**" then use bullet points under each for details
+- Under each ingredient/item, use sub-bullets starting with a label: "- What it is: ...", "- Why it matters: ..."
+- Do NOT use emoji — the app renders visual icons automatically
+- Do NOT repeat the product name or safety score — the app shows those visually
+- Keep each section focused. Use short, scannable sentences
+- End with a brief ## Verdict section summarizing your recommendation`;
+
+const SYSTEM_PROMPT = `You are Lumi, GoodFor's friendly and knowledgeable AI health assistant. You help users understand food products, ingredients, nutrition labels, and make healthier choices. You also help with recipes, meal planning, pantry management, and healthy shopping.
 
 Key traits:
 - Friendly, clear, and concise
 - Evidence-based advice
 - Consider user's allergens, dietary preferences, and family members
 - When analyzing products, highlight concerns and suggest alternatives
-- Use emoji sparingly for friendliness
-- Format responses with markdown for readability (bold, lists, headers)
-- Keep responses focused and actionable`;
-
-const SYSTEM_PROMPT_BEAUTY = `You are Lumi, GoodFor's friendly and knowledgeable AI beauty & skincare assistant. You help users understand cosmetic and beauty product ingredients, safety profiles, and make safer choices.
-
-Key traits:
-- Friendly, clear, and concise
-- Evidence-based advice on ingredient safety
-- Focus on sensitization risks, endocrine disruptors, and environmental impact
-- Categorize ingredients by function (preservative, surfactant, active, UV filter, fragrance)
-- Suggest gentler alternatives for problematic ingredients
-- Use emoji sparingly for friendliness
-- Format responses with markdown for readability (bold, lists, headers)
-- Keep responses focused and actionable`;
+- When helping with recipes, focus on ingredient health and suggest swaps
+- Keep responses focused and actionable
+${FORMATTING_RULES}`;
 
 /**
  * Build the system prompt with user context
  */
-const buildSystemPrompt = (ageGroup, userContext, isBeauty) => {
-    const base = isBeauty ? SYSTEM_PROMPT_BEAUTY : SYSTEM_PROMPT_FOOD;
-
-    let contextParts = [base];
+const buildSystemPrompt = (ageGroup, userContext) => {
+    let contextParts = [SYSTEM_PROMPT];
 
     if (ageGroup) {
         contextParts.push(`\nThe user's age group context is: ${ageGroup}. Tailor your advice accordingly.`);
@@ -68,11 +65,23 @@ const buildSystemPrompt = (ageGroup, userContext, isBeauty) => {
 /**
  * Try sending via Supabase Edge Function first
  */
-const sendViaEdgeFunction = async (messages, ageGroup, userContext, isBeautyProduct) => {
+const sendViaEdgeFunction = async (messages, ageGroup, userContext, imageData = null) => {
     const { data: { session } } = await supabase.auth.getSession();
 
     if (!session?.access_token) {
         throw new Error('You must be signed in to use Lumi');
+    }
+
+    const body = {
+        messages,
+        ageGroup,
+        userContext,
+    };
+
+    // Attach image data if present
+    if (imageData) {
+        body.imageBase64 = imageData.base64;
+        body.imageMimeType = imageData.mimeType || 'image/jpeg';
     }
 
     const response = await fetch(`${SUPABASE_URL}/functions/v1/lumi-chat`, {
@@ -82,12 +91,7 @@ const sendViaEdgeFunction = async (messages, ageGroup, userContext, isBeautyProd
             'Authorization': `Bearer ${session.access_token}`,
             'apikey': SUPABASE_ANON_KEY,
         },
-        body: JSON.stringify({
-            messages,
-            ageGroup,
-            userContext,
-            isBeautyProduct,
-        }),
+        body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -111,14 +115,14 @@ const sendViaEdgeFunction = async (messages, ageGroup, userContext, isBeautyProd
 };
 
 /**
- * Direct OpenAI API fallback
+ * Direct OpenAI API fallback (text only — images not supported in fallback)
  */
-const sendViaOpenAI = async (messages, ageGroup, userContext, isBeautyProduct) => {
+const sendViaOpenAI = async (messages, ageGroup, userContext) => {
     if (!OPENAI_API_KEY) {
         throw new Error('OpenAI API key not configured. Please add EXPO_PUBLIC_OPENAI_API_KEY to your .env file.');
     }
 
-    const systemPrompt = buildSystemPrompt(ageGroup, userContext, isBeautyProduct);
+    const systemPrompt = buildSystemPrompt(ageGroup, userContext);
 
     const apiMessages = [
         { role: 'system', content: systemPrompt },
@@ -137,7 +141,7 @@ const sendViaOpenAI = async (messages, ageGroup, userContext, isBeautyProduct) =
             model: 'gpt-4o-mini',
             messages: apiMessages,
             temperature: 0.7,
-            max_tokens: 1024,
+            max_tokens: 2048,
         }),
     });
 
@@ -159,22 +163,27 @@ const sendViaOpenAI = async (messages, ageGroup, userContext, isBeautyProduct) =
 
 /**
  * Send a message to Lumi — tries Edge Function first, falls back to direct OpenAI
+ * @param {Array} messages - Conversation messages
+ * @param {string} ageGroup - User age group
+ * @param {Object} userContext - User preferences
+ * @param {boolean} _isBeautyProduct - DEPRECATED, kept for backward compat, ignored
+ * @param {Object|null} imageData - Optional { base64, mimeType } for image analysis
  */
-export const sendMessage = async (messages, ageGroup = 'adult', userContext = {}, isBeautyProduct = false) => {
-    console.log('[Lumi] Sending message, isBeauty:', isBeautyProduct);
+export const sendMessage = async (messages, ageGroup = 'adult', userContext = {}, _isBeautyProduct = false, imageData = null) => {
+    console.log('[Lumi] Sending message, hasImage:', !!imageData);
 
     // Try Edge Function first
     try {
-        const result = await sendViaEdgeFunction(messages, ageGroup, userContext, isBeautyProduct);
+        const result = await sendViaEdgeFunction(messages, ageGroup, userContext, imageData);
         console.log('[Lumi] Edge function success');
         return result;
     } catch (edgeError) {
         console.warn('[Lumi] Edge function failed, trying direct OpenAI:', edgeError.message);
     }
 
-    // Fallback to direct OpenAI
+    // Fallback to direct OpenAI (text only)
     try {
-        const result = await sendViaOpenAI(messages, ageGroup, userContext, isBeautyProduct);
+        const result = await sendViaOpenAI(messages, ageGroup, userContext);
         console.log('[Lumi] Direct OpenAI success');
         return result;
     } catch (openaiError) {

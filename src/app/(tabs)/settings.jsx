@@ -6,13 +6,14 @@ import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-na
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Award, RefreshCw, LogOut, Database, Trash2, Palette, CreditCard,
-  Wind, Leaf, BarChart2, Type, Info, ChevronRight, Bell, MessageCircle, Star
+  Wind, Leaf, BarChart2, Type, Info, ChevronRight, Bell, MessageCircle, Star, ShieldCheck
 } from 'lucide-react-native';
 import { colors, fonts, fontSizes, spacing, radius } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { signOut } from '@/lib/supabaseAuth';
 import { useAlert } from "@/contexts/AlertContext";
 import { hapticLight, hapticMedium } from "@/lib/haptics";
+import { clearOfflineCache, getOfflineCacheStats } from "@/lib/offlineCache";
 
 const INSIGHTS_PREFS_KEY = 'goodfor_insights_prefs';
 
@@ -26,15 +27,22 @@ export default function Settings() {
   const [envImpact, setEnvImpact] = useState(true);
   const [businessInsights, setBusinessInsights] = useState(false);
   const [isPrefsLoaded, setIsPrefsLoaded] = useState(false);
+  const [cacheStats, setCacheStats] = useState({ itemCount: 0, sizeFormatted: '0 MB' });
 
   const opacity = useSharedValue(0);
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
   }));
 
+  const loadCacheStats = async () => {
+    const stats = await getOfflineCacheStats();
+    setCacheStats(stats);
+  };
+
   useFocusEffect(
     useCallback(() => {
       opacity.value = withTiming(1, { duration: 400 });
+      loadCacheStats();
       return () => {
         opacity.value = 0;
       };
@@ -119,6 +127,13 @@ export default function Settings() {
         { icon: Star, label: 'Rate Us', subtitle: 'Leave a review on the App Store', color: colors.chart2, destructive: false, onPress: () => showAlert('Rate Us', 'Thank you for your support! Store links coming soon.') },
       ],
     },
+    {
+      title: 'LEGAL',
+      items: [
+        { icon: ShieldCheck, label: 'Terms & Conditions', color: colors.primary, destructive: false, onPress: () => router.push('/terms-and-conditions') },
+        { icon: ShieldCheck, label: 'Privacy Policy', color: colors.primary, destructive: false, onPress: () => router.push('/privacy-policy') },
+      ],
+    },
   ];
 
   return (
@@ -196,6 +211,47 @@ export default function Settings() {
           </View>
         ))}
 
+
+        {/* Data Storage (Offline Cache) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>DATA STORAGE</Text>
+          <View style={styles.card}>
+            <View style={[styles.settingItem, styles.settingItemBorder]}>
+              <View style={styles.settingItemLeft}>
+                <View style={[styles.iconContainer, { backgroundColor: `${colors.chart2}1A` }]}>
+                  <Database size={24} color={colors.chart2} />
+                </View>
+                <View>
+                  <Text style={styles.settingLabel}>Offline Product Cache</Text>
+                  <Text style={styles.settingSubtitle}>
+                    {cacheStats.itemCount} items • {cacheStats.sizeFormatted}
+                  </Text>
+                </View>
+              </View>
+              <Pressable
+                onPress={async () => {
+                  hapticMedium();
+                  await clearOfflineCache();
+                  loadCacheStats();
+                  showAlert('Cache Cleared', 'Offline product cache has been cleared.');
+                }}
+                style={{
+                  backgroundColor: `${colors.destructive}1A`,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: radius.full,
+                }}
+              >
+                <Text style={{ fontSize: 12, fontFamily: fonts.sansBold, color: colors.destructive }}>Clear</Text>
+              </Pressable>
+            </View>
+            <View style={styles.settingNote}>
+              <Text style={styles.settingNoteText}>
+                Recently scanned products are saved to your device to load faster and save data.
+              </Text>
+            </View>
+          </View>
+        </View>
 
         {/* Insights Preferences */}
         <View style={styles.section}>

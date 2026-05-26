@@ -9,7 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const CONCERNS = [
     { label: "Allergies", color: "#EA4335", bg: "rgba(234, 67, 53, 0.08)" },
     { label: "Digestive issues", color: "#FBBC04", bg: "rgba(251, 188, 4, 0.08)" },
-    { label: "Skin sensitivity", color: "#E8A0BF", bg: "rgba(232, 160, 191, 0.08)" },
+    { label: "High blood pressure", color: "#FCA5A5", bg: "rgba(252, 165, 165, 0.08)" },
     { label: "Weight management", color: "#4285F4", bg: "rgba(66, 133, 244, 0.08)" },
     { label: "Heart health", color: "#EA4335", bg: "rgba(234, 67, 53, 0.08)" },
     { label: "Diabetes", color: "#FBBC04", bg: "rgba(251, 188, 4, 0.08)" },

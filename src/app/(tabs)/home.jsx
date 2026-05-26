@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { View, Text, ScrollView, Image, Pressable, ActivityIndicator, TouchableOpacity, Modal } from "react-native";
+import { View, Text, ScrollView, Image, Pressable, ActivityIndicator, TouchableOpacity, Modal, FlatList } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -20,6 +20,12 @@ import {
   ShoppingCart,
   Tag,
   PackageOpen,
+  ChefHat,
+  Clock,
+  Camera,
+  Link,
+  Leaf,
+  UtensilsCrossed,
 } from "lucide-react-native";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { colors } from "@/constants/theme";
@@ -30,6 +36,7 @@ import { getOrCreateTodayBasket, getStreak, getScoreColor } from '@/lib/basketSe
 import { scheduleShoppingReminder, requestNotificationPermission } from '@/lib/notificationService';
 import { updateWidgetData } from '@/widgets/widgetSync';
 import { StreakFlame } from '@/components/AnimatedEffects';
+import { getUserRecipes } from '@/lib/recipeService';
 
 export default function Home() {
   const insets = useSafeAreaInsets();
@@ -45,11 +52,14 @@ export default function Home() {
   const [recallCount, setRecallCount] = useState(0);
   const [basketData, setBasketData] = useState(null);
   const [streakData, setStreakData] = useState(null);
+  const [userRecipes, setUserRecipes] = useState([]);
+  const [loadingRecipes, setLoadingRecipes] = useState(false);
 
   useEffect(() => {
     if (profile) {
       loadFamilyMembers();
       loadRecentScans();
+      loadUserRecipes();
       // V5: Load recall alert count
       fetchAllRecalls().then(recalls => setRecallCount(recalls?.length || 0)).catch(() => { });
       // V8: Request permissions and schedule shopping reminders
@@ -67,6 +77,7 @@ export default function Home() {
       if (profile) {
         loadFamilyMembers();
         loadRecentScans();
+        loadUserRecipes();
         // V8: Load basket data
         loadBasketData();
       }
@@ -91,6 +102,18 @@ export default function Home() {
     } catch (e) {
       // Basket tables might not exist yet, fail silently
       console.log('[Home] Basket load error (tables may not exist):', e.message);
+    }
+  };
+
+  const loadUserRecipes = async () => {
+    try {
+      setLoadingRecipes(true);
+      const recipes = await getUserRecipes(profile.id, { limit: 5 });
+      setUserRecipes(recipes || []);
+    } catch (err) {
+      console.log('[Home] Recipe load error:', err.message);
+    } finally {
+      setLoadingRecipes(false);
     }
   };
 
@@ -390,80 +413,369 @@ export default function Home() {
           </Text>
         </View>
 
-        {/* V8: Smart Basket Card — with live data (top of hierarchy) */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => router.push('/basket')}
-          style={{
-            backgroundColor: colors.card,
-            borderRadius: 20,
-            padding: 16,
-            marginBottom: 16,
-            borderWidth: 1.5,
-            borderColor: `${colors.primary}20`,
-          }}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {/* V8: Today's Basket Card */}
+        {basketData && (
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => router.push('/basket')}
+            style={{
+              backgroundColor: colors.card,
+              borderRadius: 24,
+              padding: 20,
+              marginBottom: 20,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.06,
+              shadowRadius: 8,
+              borderWidth: 1,
+              borderColor: `${colors.border}30`,
+            }}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{
+                  width: 40, height: 40, borderRadius: 20,
+                  backgroundColor: `${getScoreColor(basketData.health_score || 0)}15`,
+                  alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <ShoppingCart size={20} color={getScoreColor(basketData.health_score || 0)} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontFamily: 'Rubik_700Bold', color: colors.foreground }}>
+                    Today's Basket
+                  </Text>
+                  <Text style={{ fontSize: 12, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground }}>
+                    {basketData.items?.length || 0} items scanned
+                  </Text>
+                </View>
+              </View>
+              {streakData && streakData.current_streak > 0 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <StreakFlame size={20} />
+                  <Text style={{ fontSize: 14, fontFamily: 'Rubik_700Bold', color: '#F59E0B' }}>
+                    {streakData.current_streak}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Health Score Bar */}
             <View style={{
-              width: 44, height: 44, borderRadius: 22,
-              backgroundColor: colors.primary,
-              alignItems: 'center', justifyContent: 'center', marginRight: 14,
+              backgroundColor: `${colors.muted}80`,
+              borderRadius: 10,
+              height: 8,
+              overflow: 'hidden',
             }}>
-              <ShoppingCart size={20} color={colors.primaryForeground} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ fontSize: 15, fontFamily: 'Rubik_700Bold', color: colors.foreground }}>
-                Smart Basket
-              </Text>
-              <Text style={{ fontSize: 12, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground, marginTop: 1 }}>
-                {basketData?.basket_items?.length > 0
-                  ? `${basketData.basket_items.length} items today`
-                  : 'Build your basket & track your score'}
-              </Text>
-            </View>
-            {basketData?.score > 0 ? (
               <View style={{
-                backgroundColor: `${getScoreColor(basketData.score)}15`,
-                borderRadius: 12,
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-                alignItems: 'center',
-              }}>
-                <Text style={{ fontSize: 18, fontFamily: 'Rubik_700Bold', color: getScoreColor(basketData.score) }}>
-                  {basketData.score}
-                </Text>
-                <Text style={{ fontSize: 9, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground }}>/100</Text>
-              </View>
-            ) : (
-              <View style={{
-                backgroundColor: colors.primary,
-                borderRadius: 12,
-                paddingHorizontal: 12,
-                paddingVertical: 6,
-              }}>
-                <Text style={{ fontSize: 11, fontFamily: 'Rubik_600SemiBold', color: '#FFF' }}>
-                  Start →
-                </Text>
-              </View>
-            )}
+                width: `${Math.min(100, basketData.health_score || 0)}%`,
+                height: '100%',
+                borderRadius: 10,
+                backgroundColor: getScoreColor(basketData.health_score || 0),
+              }} />
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+              <Text style={{ fontSize: 11, fontFamily: 'Rubik_500Medium', color: colors.mutedForeground }}>
+                Health Score
+              </Text>
+              <Text style={{ fontSize: 11, fontFamily: 'Rubik_700Bold', color: getScoreColor(basketData.health_score || 0) }}>
+                {basketData.health_score || 0}/100
+              </Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* V9: Recipe Discovery Section — Data-driven */}
+        <View style={{ marginBottom: 24 }}>
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 14,
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 18,
+                fontFamily: 'Rubik_700Bold',
+                color: colors.foreground,
+              }}
+            >
+              My Recipes
+            </Text>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/recipes')}>
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontFamily: 'Rubik_600SemiBold',
+                  color: colors.primary,
+                }}
+              >
+                See All
+              </Text>
+            </TouchableOpacity>
           </View>
-          {/* Streak badge */}
-          {streakData?.current_streak > 0 && (
-            <View style={{
-              flexDirection: 'row', alignItems: 'center', gap: 6,
-              marginTop: 10, paddingTop: 10,
-              borderTopWidth: 1, borderTopColor: `${colors.border}30`,
-            }}>
-              <StreakFlame size={22} />
-              <Text style={{ fontSize: 12, fontFamily: 'Rubik_600SemiBold', color: colors.foreground }}>
-                {streakData.current_streak} week streak
+
+          {loadingRecipes ? (
+            <ActivityIndicator color={colors.primary} style={{ paddingVertical: 30 }} />
+          ) : userRecipes.length > 0 ? (
+            <>
+              {/* Recipe Carousel */}
+              <FlatList
+                horizontal
+                data={userRecipes}
+                keyExtractor={(item) => item.id}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 12, paddingBottom: 4 }}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => router.push({ pathname: '/recipe-detail', params: { id: item.id } })}
+                    style={{
+                      width: 170,
+                      backgroundColor: colors.card,
+                      borderRadius: 18,
+                      overflow: 'hidden',
+                      shadowColor: '#000',
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.06,
+                      shadowRadius: 8,
+                      borderWidth: 1,
+                      borderColor: `${colors.border}40`,
+                    }}
+                  >
+                    {/* Image */}
+                    <View
+                      style={{
+                        height: 120,
+                        backgroundColor: `${colors.primary}08`,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        position: 'relative',
+                      }}
+                    >
+                      {item.image_url ? (
+                        <Image
+                          source={{ uri: item.image_url }}
+                          style={{ width: '100%', height: '100%' }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <UtensilsCrossed size={28} color={`${colors.primary}30`} />
+                      )}
+                      {/* Health Score Badge */}
+                      {item.health_score != null && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 3,
+                            backgroundColor: 'rgba(255,255,255,0.92)',
+                            paddingHorizontal: 6,
+                            paddingVertical: 3,
+                            borderRadius: 8,
+                          }}
+                        >
+                          <Leaf size={10} color={colors.chart1} />
+                          <Text style={{ fontSize: 10, fontFamily: 'Rubik_700Bold', color: colors.chart1 }}>
+                            {item.health_score}
+                          </Text>
+                        </View>
+                      )}
+                      {/* Cook Time */}
+                      {item.total_time_minutes > 0 && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            bottom: 6,
+                            left: 6,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 3,
+                            backgroundColor: 'rgba(0,0,0,0.55)',
+                            paddingHorizontal: 6,
+                            paddingVertical: 3,
+                            borderRadius: 6,
+                          }}
+                        >
+                          <Clock size={10} color="#FFF" />
+                          <Text style={{ fontSize: 10, fontFamily: 'Rubik_500Medium', color: '#FFF' }}>
+                            {item.total_time_minutes} min
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    {/* Title */}
+                    <View style={{ padding: 10 }}>
+                      <Text
+                        style={{
+                          fontSize: 13,
+                          fontFamily: 'Rubik_600SemiBold',
+                          color: colors.foreground,
+                        }}
+                        numberOfLines={2}
+                      >
+                        {item.title}
+                      </Text>
+                      {item.category && (
+                        <Text
+                          style={{
+                            fontSize: 11,
+                            fontFamily: 'Rubik_400Regular',
+                            color: colors.mutedForeground,
+                            marginTop: 2,
+                            textTransform: 'capitalize',
+                          }}
+                        >
+                          {item.category}
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+
+              {/* Quick Actions */}
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => router.push('/recipe-import')}
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    backgroundColor: colors.card,
+                    borderRadius: 14,
+                    paddingVertical: 12,
+                    borderWidth: 1,
+                    borderColor: `${colors.border}50`,
+                  }}
+                >
+                  <Link size={16} color={colors.primary} />
+                  <Text style={{ fontSize: 13, fontFamily: 'Rubik_600SemiBold', color: colors.primary }}>
+                    Import Recipe
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => router.push('/fridge-scanner')}
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    backgroundColor: colors.primary,
+                    borderRadius: 14,
+                    paddingVertical: 12,
+                  }}
+                >
+                  <Camera size={16} color={colors.primaryForeground} />
+                  <Text style={{ fontSize: 13, fontFamily: 'Rubik_600SemiBold', color: colors.primaryForeground }}>
+                    Scan Fridge
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            /* Empty State */
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.push('/recipe-import')}
+              style={{
+                backgroundColor: colors.card,
+                borderRadius: 20,
+                padding: 28,
+                alignItems: 'center',
+                borderWidth: 1.5,
+                borderColor: `${colors.primary}15`,
+              }}
+            >
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  backgroundColor: `${colors.primary}10`,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 14,
+                }}
+              >
+                <ChefHat size={28} color={colors.primary} />
+              </View>
+              <Text
+                style={{
+                  fontSize: 17,
+                  fontFamily: 'Rubik_700Bold',
+                  color: colors.foreground,
+                  marginBottom: 6,
+                }}
+              >
+                Start Cooking Smarter
               </Text>
-              <Text style={{ fontSize: 11, fontFamily: 'Rubik_400Regular', color: colors.mutedForeground }}>
-                • Avg {streakData.average_score}/100
+              <Text
+                style={{
+                  fontSize: 13,
+                  fontFamily: 'Rubik_400Regular',
+                  color: colors.mutedForeground,
+                  textAlign: 'center',
+                  lineHeight: 19,
+                  marginBottom: 18,
+                }}
+              >
+                Import recipes from URLs, scan fridge photos,{`\n`}or snap cookbook pages to get started.
               </Text>
-            </View>
+              <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => router.push('/recipe-import')}
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    backgroundColor: colors.primary,
+                    borderRadius: 12,
+                    paddingVertical: 12,
+                  }}
+                >
+                  <Link size={14} color={colors.primaryForeground} />
+                  <Text style={{ fontSize: 13, fontFamily: 'Rubik_600SemiBold', color: colors.primaryForeground }}>
+                    Import
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => router.push('/fridge-scanner')}
+                  style={{
+                    flex: 1,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6,
+                    backgroundColor: colors.card,
+                    borderRadius: 12,
+                    paddingVertical: 12,
+                    borderWidth: 1.5,
+                    borderColor: `${colors.primary}30`,
+                  }}
+                >
+                  <Camera size={14} color={colors.primary} />
+                  <Text style={{ fontSize: 13, fontFamily: 'Rubik_600SemiBold', color: colors.primary }}>
+                    Scan Fridge
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
           )}
-        </TouchableOpacity>
+        </View>
 
         {/* Active Profiles Card */}
         <View
@@ -755,7 +1067,10 @@ export default function Home() {
                               sugars: nutritionFacts.sugars || 0,
                               sodium: nutritionFacts.sodium || 0,
                               salt: nutritionFacts.salt || 0,
+                              fat: nutritionFacts.fat || 0,
                               saturated_fat: nutritionFacts.saturated_fat || nutritionFacts['saturated-fat'] || 0,
+                              'saturated-fat': nutritionFacts.saturated_fat || nutritionFacts['saturated-fat'] || 0,
+                              'trans-fat': nutritionFacts.trans_fat || nutritionFacts['trans-fat'] || 0,
                               proteins: nutritionFacts.proteins || 0,
                               fiber: nutritionFacts.fiber || 0,
                               caffeine: nutritionFacts.caffeine || 0,

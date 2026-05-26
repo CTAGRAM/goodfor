@@ -1,5 +1,5 @@
-import { Tabs } from "expo-router";
-import { View } from "react-native";
+import { Tabs, useRouter } from "expo-router";
+import { View, Pressable, StyleSheet } from "react-native";
 import { Home, History, QrCode, MessageCircle, Settings } from "lucide-react-native";
 import { colors } from "@/constants/theme";
 import { hapticLight, hapticMedium } from "@/lib/haptics";
@@ -7,8 +7,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export default function TabLayout() {
     const insets = useSafeAreaInsets();
+    const router = useRouter();
 
     return (
+        <View style={{ flex: 1 }}>
         <Tabs
             screenListeners={{
                 tabPress: (e) => {
@@ -140,6 +142,15 @@ export default function TabLayout() {
                     ),
                 }}
             />
+            {/* Hide recipes tab — it's accessible via home card instead */}
+            <Tabs.Screen
+                name="recipes"
+                options={{
+                    href: null,
+                }}
+            />
         </Tabs>
+        </View>
     );
 }
+

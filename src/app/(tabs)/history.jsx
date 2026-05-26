@@ -40,7 +40,6 @@ export default function History() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [pickerMonth, setPickerMonth] = useState(new Date().getMonth());
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
-  const [scanTypeFilter, setScanTypeFilter] = useState("all"); // all, food, beauty
   const [favoriteProductIds, setFavoriteProductIds] = useState(new Set());
 
   const opacity = useSharedValue(0);
@@ -164,35 +163,6 @@ export default function History() {
       if (scanDate !== filterDate) return false;
     }
 
-    // Type filter - V4 improved beauty detection with false-positive prevention
-    if (scanTypeFilter !== 'all') {
-      const categoryLower = (scan.category || '').toLowerCase();
-      const productNameLower = (scan.products?.name || scan.product_name || '').toLowerCase();
-
-      // Explicit beauty markers (high confidence)
-      const isExplicitBeauty = scan.product_type === 'BEAUTY' ||
-        scan.safety_details?.productType === 'BEAUTY';
-
-      // Food-specific keywords that override beauty keyword matches
-      const foodExclusions = ['ice cream', 'cream cheese', 'sour cream', 'cream of', 'cream soup',
-        'cream pie', 'cream puff', 'whipped cream', 'hand soap' /* already food-safe */,
-        'bar soap' /* ambiguous */, 'cookie', 'cake', 'cereal', 'snack', 'beverage', 'drink',
-        'juice', 'candy', 'chocolate', 'chips', 'bread', 'pasta', 'sauce', 'yogurt'];
-      const isFoodByContext = foodExclusions.some(fw => categoryLower.includes(fw) || productNameLower.includes(fw));
-
-      // Beauty keywords - only used when product isn't clearly food
-      const beautyKeywords = ['cosmetic', 'beauty', 'skincare', 'haircare', 'fragrance',
-        'makeup', 'perfume', 'lotion', 'shampoo', 'conditioner', 'serum', 'moisturizer',
-        'sunscreen', 'deodorant', 'lipstick', 'mascara', 'foundation', 'cleanser', 'toner'];
-      const hasBeautyKeyword = !isFoodByContext &&
-        beautyKeywords.some(kw => categoryLower.includes(kw) || productNameLower.includes(kw));
-
-      const isBeauty = isExplicitBeauty || hasBeautyKeyword;
-
-      if (scanTypeFilter === 'food' && isBeauty) return false;
-      if (scanTypeFilter === 'beauty' && !isBeauty) return false;
-    }
-
     return true;
   });
 
@@ -223,7 +193,10 @@ export default function History() {
         sugars: nutritionFacts.sugars || 0,
         sodium: nutritionFacts.sodium || 0,
         salt: nutritionFacts.salt || 0,
+        fat: nutritionFacts.fat || 0,
         saturated_fat: nutritionFacts.saturated_fat || nutritionFacts['saturated-fat'] || 0,
+        'saturated-fat': nutritionFacts.saturated_fat || nutritionFacts['saturated-fat'] || 0,
+        'trans-fat': nutritionFacts.trans_fat || nutritionFacts['trans-fat'] || 0,
         proteins: nutritionFacts.proteins || 0,
         fiber: nutritionFacts.fiber || 0,
         caffeine: nutritionFacts.caffeine || 0,
@@ -336,20 +309,6 @@ export default function History() {
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
-  const foodStyle = useAnimatedStyle(() => {
-    return {
-      backgroundColor: withTiming(scanTypeFilter === 'food' ? colors.primary : colors.card, { duration: 250 }),
-      borderColor: withTiming(scanTypeFilter === 'food' ? colors.primary : `${colors.border}40`, { duration: 250 }),
-    };
-  }, [scanTypeFilter]);
-
-  const beautyStyle = useAnimatedStyle(() => {
-    return {
-      backgroundColor: withTiming(scanTypeFilter === 'beauty' ? colors.primary : colors.card, { duration: 250 }),
-      borderColor: withTiming(scanTypeFilter === 'beauty' ? colors.primary : `${colors.border}40`, { duration: 250 }),
-    };
-  }, [scanTypeFilter]);
-
   const historyData = groupScansByDate(filteredScans);
 
   return (
@@ -428,7 +387,7 @@ export default function History() {
 
       {/* Active Date Filter Chip */}
       {dateFilter !== 'all' && (
-        <View style={{ flexDirection: 'row', paddingHorizontal: spacing[6], paddingBottom: spacing[2] }}>
+        <View style={{ flexDirection: 'row', paddingHorizontal: spacing[6], paddingBottom: spacing[4] }}>
           <TouchableOpacity
             style={{
               flexDirection: 'row',
@@ -451,29 +410,6 @@ export default function History() {
           </TouchableOpacity>
         </View>
       )}
-
-      {/* Filter Toggles */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: spacing[6], paddingBottom: spacing[4], gap: spacing[3] }}>
-        <Pressable
-          style={{ flex: 1 }}
-          onPress={() => setScanTypeFilter(prev => prev === 'food' ? 'all' : 'food')}
-        >
-          <Animated.View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: radius.xl, borderWidth: 1 }, foodStyle]}>
-            <Utensils size={16} color={scanTypeFilter === 'food' ? colors.primaryForeground : colors.mutedForeground} />
-            <Text style={{ fontFamily: fonts.sans.bold, fontSize: 13, color: scanTypeFilter === 'food' ? colors.primaryForeground : colors.mutedForeground }}>Food</Text>
-          </Animated.View>
-        </Pressable>
-
-        <Pressable
-          style={{ flex: 1 }}
-          onPress={() => setScanTypeFilter(prev => prev === 'beauty' ? 'all' : 'beauty')}
-        >
-          <Animated.View style={[{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: radius.xl, borderWidth: 1 }, beautyStyle]}>
-            <Sparkles size={16} color={scanTypeFilter === 'beauty' ? colors.primaryForeground : colors.mutedForeground} />
-            <Text style={{ fontFamily: fonts.sans.bold, fontSize: 13, color: scanTypeFilter === 'beauty' ? colors.primaryForeground : colors.mutedForeground }}>Beauty</Text>
-          </Animated.View>
-        </Pressable>
-      </View>
 
       {loading ? (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>

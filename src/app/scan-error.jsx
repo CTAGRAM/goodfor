@@ -8,7 +8,6 @@ import { Button } from '@/components/ui';
 import * as ImagePicker from 'expo-image-picker';
 import { analyzeLabel } from '@/lib/geminiVision';
 import { analyzeProductSafety, yearsToMonths } from '@/lib/productSafety';
-import { analyzeCosmeticSafety } from '@/lib/cosmeticSafety';
 import { useAuth } from '@/contexts/AuthContext';
 import { hapticSuccess, hapticError } from '@/lib/haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -82,12 +81,7 @@ export default function ScanError() {
                 cosmeticAllergens: ageSource?.cosmetic_allergens || [],
             };
 
-            let safetyAnalysis;
-            if (product.productType === 'BEAUTY') {
-                safetyAnalysis = analyzeCosmeticSafety(product, userPreferences);
-            } else {
-                safetyAnalysis = analyzeProductSafety(product, ageMonths, userPreferences);
-            }
+            const safetyAnalysis = analyzeProductSafety(product, ageMonths, userPreferences);
 
             // Add the captured image as product image
             product.imageUrl = imageAsset.uri;
@@ -128,11 +122,6 @@ export default function ScanError() {
                     <View style={styles.iconContainer}>
                         {/* Animated scanning rings behind mascot */}
                         <ScanningRings size={180} />
-                        {/* Panda detective mascot overlay */}
-                        <Image
-                            source={require('../../assets/images/panda-detective.png')}
-                            style={{ width: 120, height: 120, resizeMode: 'contain', position: 'absolute' }}
-                        />
                     </View>
                     <View style={styles.textContainer}>
                         <Text style={styles.title}>{analysisStatus}</Text>
